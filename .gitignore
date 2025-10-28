@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.DS_Store
+*.duckdb
+*.duckdb.wal
+.*_history
+.mypy_cache
+*.py.text-chunks
+.tmp
+.vocode
+.terminal_history
+
+# Virtual environments
+.venv/
