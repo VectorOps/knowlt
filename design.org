@@ -1,0 +1,15 @@
+#+title: Design
+
+Goals:
+1. Much simpler data model:
+   - Nodes having header and type
+   - Majority of Nodes should have literal type
+   - No signatures or parameters
+   - Still resolve file-level imports/exports and resolve dependencies
+   - Keep general structure for Project/Repo/Package/File/Node/ImportEdge
+   - Much simpler parsers:
+     - Special recursive case for nested symbols (classes, structs, functions, etc)
+     - Extraction of header for special cases
+     - Otherwise all literals
+2. Pipelined data layer?
+3. No repomap in v1, or ever
