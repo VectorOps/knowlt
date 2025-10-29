@@ -11,7 +11,7 @@ from knowlt.data import (
     ImportEdgeFilter,
 )
 from knowlt.stores.duckdb import DuckDBDataRepository
-from knowlt.models import Repo
+from knowlt.models import Repo, NodeKind
 from knowlt.helpers import generate_id
 from knowlt.parsers import CodeParserRegistry
 
@@ -121,10 +121,12 @@ async def test_upsert_parsed_file_insert_update_delete(tmp_path: Path):
     file_id = next(f.id for f in files if f.path == "mod.py")
     file_id_mod2 = next(f.id for f in files if f.path == "mod2.py")
 
-    # symbols: CONST + foo
+    # symbols: literal assignment for CONST + foo function
     symbols = await rs.node.get_list(NodeFilter(file_ids=[file_id]))
     names = {s.name for s in symbols if s.name}
-    assert names == {"CONST", "foo"}
+    assert "foo" in names
+    # assignment should be emitted as a literal without a name
+    assert any((s.kind == NodeKind.LITERAL and "CONST = 1" in (s.body or "")) for s in symbols)
 
     # Node IDs may change between updates; do not assert signature fields.
     # import-edge created for 'import os'
