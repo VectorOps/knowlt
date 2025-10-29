@@ -33,13 +33,9 @@ from knowlt.embedding_helpers import (
     schedule_missing_embeddings,
     schedule_outdated_embeddings,
     schedule_symbol_embedding,
+    SymbolEmbeddingItem,
 )
 
-
-@dataclass
-class EmbeddingTask:
-    symbol_id: str
-    text: str
 
 
 class ScanProgress(BaseModel):
@@ -55,7 +51,7 @@ class ScanProgress(BaseModel):
 class ParsingState:
     def __init__(self) -> None:
         self.pending_import_edges: list[ImportEdge] = []
-        self.pending_embeddings: list[EmbeddingTask] = []
+        self.pending_embeddings: list[SymbolEmbeddingItem] = []
 
 
 class ProcessFileStatus(Enum):
@@ -397,20 +393,16 @@ async def scan_repo(
             "Scheduling embeddings for new/updated symbols",
             count=len(state.pending_embeddings),
         )
-        await asyncio.gather(
-            *[
-                schedule_symbol_embedding(
-                    pm.data.node, pm.embeddings, sym_id=task.symbol_id, body=task.text
-                )
-                for task in state.pending_embeddings
-            ]
+        # Mass-schedule in background; do not wait here
+        asyncio.create_task(
+            schedule_symbol_embedding(pm.data.node, pm.embeddings, state.pending_embeddings)
         )
 
     # Refresh any full text indexes
     pm.data.refresh_indexes()
-
-    await schedule_missing_embeddings(pm, repo)
-    await schedule_outdated_embeddings(pm, repo)
+    # Schedule missing/outdated embeddings in background
+    asyncio.create_task(schedule_missing_embeddings(pm, repo))
+    asyncio.create_task(schedule_outdated_embeddings(pm, repo))
 
     duration = time.perf_counter() - start_time
     logger.debug(
@@ -648,7 +640,7 @@ async def upsert_parsed_file(
 
         if schedule_emb:
             state.pending_embeddings.append(
-                EmbeddingTask(symbol_id=sm.id, text=embedding_text)
+                SymbolEmbeddingItem(symbol_id=sm.id, body=embedding_text)
             )
 
         # recurse into children
