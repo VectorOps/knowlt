@@ -98,7 +98,6 @@ class ParsedNode(BaseModel):
 class ParsedFile(BaseModel):
     package: Optional[ParsedPackage] = None
     path: str  # relative path
-    language: ProgrammingLanguage
     docstring: Optional[str] = None
 
     file_hash: Optional[str] = None
@@ -112,7 +111,6 @@ class ParsedFile(BaseModel):
             "path": self.path,
             "file_hash": self.file_hash,
             "last_updated": self.last_updated,
-            "language": self.language,
         }
 
 
@@ -181,7 +179,7 @@ class AbstractCodeParser(ABC):
             nodes = self._process_node(child)
 
             if nodes:
-                self.parsed_file.symbols.extend(nodes)
+                self.parsed_file.nodes.extend(nodes)
             else:
                 logger.warning(
                     "Parser handled node but produced no symbols",
@@ -211,11 +209,39 @@ class AbstractCodeParser(ABC):
         return ParsedFile(
             package=self.package,
             path=self.rel_path,
-            language=self.language,
             file_hash=compute_file_hash(file_path),
             last_updated=mtime,
-            symbols=[],
+            nodes=[],
             imports=[],
+        )
+
+    def _make_node(
+        self,
+        node: Any,
+        *,
+        kind: NodeKind,
+        name: Optional[str] = None,
+        header: Optional[str] = None,
+        subtype: Optional[str] = None,
+        comment: Optional[str] = None,
+        docstring: Optional[str] = None,
+    ) -> ParsedNode:
+        """
+        Construct a ParsedNode from a tree-sitter node with common fields.
+        """
+        text = get_node_text(node) or ""
+        return ParsedNode(
+            name=name,
+            body=text,
+            kind=kind,
+            subtype=subtype,
+            start_line=node.start_point[0] + 1,
+            end_line=node.end_point[0] + 1,
+            start_byte=node.start_byte,
+            end_byte=node.end_byte,
+            header=header,
+            docstring=docstring,
+            comment=comment,
         )
 
 

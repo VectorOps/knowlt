@@ -20,6 +20,7 @@ from knowlt.models import (
     Package,
     Node,
     ImportEdge,
+    ModelId,
     NodeKind,
 )
 from knowlt.data import NodeFilter, ImportEdgeFilter, PackageFilter, FileFilter
@@ -647,7 +648,7 @@ async def upsert_parsed_file(
 
     await node_repo.delete_by_file_ids([file_meta.id])
 
-    for sym in parsed_file.symbols:
+    for sym in parsed_file.nodes:
         _insert_node(sym)
 
     if nodes_to_create:
