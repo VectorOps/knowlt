@@ -388,7 +388,7 @@ class DuckDBPackageRepo(_DuckDBBaseRepo[Package], data.AbstractPackageRepository
 
     async def get_by_physical_paths(
         self, repo_id: ModelId, root_paths: List[str]
-    ) -> Optional[Package]:
+    ) -> List[Package]:
         q = (
             Query.from_(self._table)
             .select("*")
@@ -398,11 +398,11 @@ class DuckDBPackageRepo(_DuckDBBaseRepo[Package], data.AbstractPackageRepository
             )
         )
         rows = await self._execute(q)
-        return self.model(**self._deserialize_data(rows[0])) if rows else None
+        return [self.model(**self._deserialize_data(r)) for r in rows]
 
     async def get_by_virtual_paths(
         self, repo_id: ModelId, root_paths: List[str]
-    ) -> Optional[Package]:
+    ) -> List[Package]:
         q = (
             Query.from_(self._table)
             .select("*")
@@ -412,7 +412,7 @@ class DuckDBPackageRepo(_DuckDBBaseRepo[Package], data.AbstractPackageRepository
             )
         )
         rows = await self._execute(q)
-        return self.model(**self._deserialize_data(rows[0])) if rows else None
+        return [self.model(**self._deserialize_data(r)) for r in rows]
 
     async def get_list(self, flt: data.PackageFilter) -> List[Package]:
         q = Query.from_(self._table).select("*")
@@ -516,7 +516,7 @@ class DuckDBFileRepo(_DuckDBBaseRepo[File], data.AbstractFileRepository):
             .where((self._table.path.isin(paths)) & (self._table.repo_id == repo_id))
         )
         rows = await self._execute(q)
-        return self.model(**self._deserialize_data(rows[0])) if rows else None
+        return [self.model(**self._deserialize_data(r)) for r in rows]
 
     async def get_list(self, flt: data.FileFilter) -> List[File]:
         q = Query.from_(self._table).select("*")
