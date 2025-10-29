@@ -85,10 +85,12 @@ async def test_package_metadata_repository(data_repo):
     # add a file that references the “used” package, leaving the first one orphaned
     await file_repo.create([File(id=make_id(), repo_id=rid, path="pkg/used/a.py", package_id=used_id)])
 
-    v = await pkg_repo.get_by_virtual_paths(rid, ["pkg/used"])
-    assert v is not None and v.id == used_id
-    p = await pkg_repo.get_by_physical_paths(rid, ["pkg/used.go"])
-    assert p is not None and p.id == used_id
+    v_list = await pkg_repo.get_by_virtual_paths(rid, ["pkg/used"])
+    assert any(v.id == used_id for v in v_list)
+    p_list = await pkg_repo.get_by_physical_paths(rid, ["pkg/used.go"])
+    assert any(p.id == used_id for p in p_list)
+
+    # list retrievals unchanged
     lst = await pkg_repo.get_list(PackageFilter(repo_ids=[rid]))
     assert {p.id for p in lst} == {orphan_id, used_id}
     # delete_orphaned should remove only the orphan package
@@ -111,7 +113,9 @@ async def test_file_metadata_repository(data_repo):
     obj = File(id=fid, repo_id=rid, package_id=pid, path="src/file.py")
 
     await file_repo.create([obj])
-    assert await file_repo.get_by_paths(rid, ["src/file.py"]) == obj
+    res = await file_repo.get_by_paths(rid, ["src/file.py"])
+    assert res and res[0] == obj
+
     assert await file_repo.get_list(FileFilter(repo_ids=[rid])) == [obj]
     assert await file_repo.get_list(FileFilter(package_id=pid)) == [obj]
     upd = await file_repo.update([(fid, {"path": "src/other.py"})])

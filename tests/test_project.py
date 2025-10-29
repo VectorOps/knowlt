@@ -47,7 +47,9 @@ def project_env(tmp_path):
     }
 
     # Async lookups
-    mock_data.repo.get_by_name = AsyncMock(side_effect=lambda name: repos_by_name.get(name))
+    mock_data.repo.get_by_name = AsyncMock(
+        side_effect=lambda name: repos_by_name.get(name)
+    )
     # AbstractCRUDRepository semantics: create/update return lists
     mock_data.project_repo.add_repo_id = AsyncMock()
     mock_data.repo.create = AsyncMock()
@@ -174,7 +176,9 @@ class TestProjectPaths:
             repo_path=project_env["default_repo"].root_path,
             paths=PathsSettings(enable_project_paths=True),
         )
-        pm_enabled = await ProjectManager.create(settings=settings_enabled, data=project_env["data"])
+        pm_enabled = await ProjectManager.create(
+            settings=settings_enabled, data=project_env["data"]
+        )
         assert pm_enabled.deconstruct_virtual_path("non_existent_repo/file.py") is None
         assert pm_enabled.deconstruct_virtual_path("default_repo") is not None
 
@@ -185,6 +189,8 @@ class TestProjectPaths:
             repo_path=project_env["default_repo"].root_path,
             paths=PathsSettings(enable_project_paths=False),
         )
-        pm_disabled = await ProjectManager.create(settings=settings_disabled, data=project_env["data"])
+        pm_disabled = await ProjectManager.create(
+            settings=settings_disabled, data=project_env["data"]
+        )
         bad_path = op.join(VIRTUAL_PATH_PREFIX, "non_existent_repo", "file.py")
         assert pm_disabled.deconstruct_virtual_path(bad_path) is None
