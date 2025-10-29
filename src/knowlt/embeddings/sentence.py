@@ -135,7 +135,6 @@ class LocalEmbeddingCalculator(EmbeddingCalculator):
                     short_texts_to_encode,
                     batch_size=self._batch_size,
                     normalize_embeddings=self._normalize,
-                    truncate=True,
                     show_progress_bar=False,
                 )
 

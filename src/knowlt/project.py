@@ -45,6 +45,25 @@ class ProjectComponent(ABC):
     def destroy(self) -> None: ...
 
 
+class ProjectCache:
+    """
+    Mutable project-wide cache for expensive/invariant information
+    that code parsers may want to re-use (ex: go.mod content).
+    """
+
+    def __init__(self) -> None:
+        self._cache: dict[str, Any] = {}
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._cache.get(key, default)
+
+    def set(self, key: str, value: Any) -> None:
+        self._cache[key] = value
+
+    def clear(self) -> None:
+        self._cache.clear()
+
+
 class ProjectManager:
     _component_registry: Dict[str, Type[ProjectComponent]] = {}
 
@@ -68,15 +87,42 @@ class ProjectManager:
         self.data = data
         self.embeddings = embeddings
         self._last_refresh_time: Optional[datetime.datetime] = None
+        self._components: dict[str, ProjectComponent] = {}
+        # In-memory caches for repos to allow sync helpers to function without async data calls
+        self._repos_by_id: dict[str, Repo] = {}
+        self._repos_by_name: dict[str, Repo] = {}
 
         if not self.settings.project_name:
             raise ValueError(f"settings.project_name is required.")
         if not self.settings.repo_name:
             raise ValueError(f"settings.repo_name is required.")
 
-        self._init_project()
+    @classmethod
+    async def create(self, settings: ProjectSettings, data: AbstractDataRepository, embeddings: Optional[EmbeddingWorker] = None):
+        p = ProjectManager(settings=settings, data=data, embeddings=embeddings)
+        await p._init_project()
+        return p
 
-        self._components: dict[str, ProjectComponent] = {}
+    async def _init_project(self):
+        # Initialize project
+        project = await self.data.project.get_by_name(self.settings.project_name)
+        if project is None:
+            project = Project(
+                id=generate_id(),
+                name=self.settings.project_name,
+            )
+            created = await self.data.project.create([project])
+            project = created[0]
+
+        self.project = project
+        self.repo_ids = await self.data.project_repo.get_repo_ids(project.id)
+
+        # Initialize default repo
+        self.default_repo = await self.add_repo_path(
+            self.settings.repo_name, self.settings.repo_path
+        )
+
+        # Initialize components
         for name, comp_cls in self._component_registry.items():
             try:
                 inst = comp_cls(self)
@@ -85,27 +131,9 @@ class ProjectManager:
             except Exception as exc:
                 logger.error("Component failed to initialize", name=name, exc=exc)
 
-    def _init_project(self):
-        # Initialize project
-        project = self.data.project.get_by_name(self.settings.project_name)
-        if project is None:
-            project = Project(
-                id=generate_id(),
-                name=self.settings.project_name,
-            )
-            self.data.project.create(project)
-        self.project = project
-
-        self.repo_ids = self.data.prj_repo.get_repo_ids(project.id)
-
-        # Initialize default repo
-        self.default_repo = self.add_repo_path(
-            self.settings.repo_name, self.settings.repo_path
-        )
-
     # Simple repo management
-    def add_repo_path(self, name, path: Optional[str] = None):
-        repo = self.data.repo.get_by_name(name)
+    async def add_repo_path(self, name, path: Optional[str] = None):
+        repo = await self.data.repo.get_by_name(name)
         if repo is None:
             if path is None:
                 raise ValueError(f"Path is required for a new repo {name}")
@@ -117,40 +145,67 @@ class ProjectManager:
                 name=name,
                 root_path=path,
             )
-            self.data.repo.create(repo)
-
-        if path and repo.root_path != path:
-            logger.warn(
+            created = await self.data.repo.create([repo])
+            repo = created[0]
+        elif path and repo.root_path != path:
+            logger.warning(
                 "Repo path does not match, updating...",
                 repo_name=name,
                 old_path=repo.root_path,
                 new_path=path,
             )
-
-            repo = self.data.repo.update(
-                repo.id,
-                {
-                    "root_path": path,
-                },
+            updated = await self.data.repo.update(
+                [
+                    (
+                        repo.id,
+                        {
+                            "root_path": path,
+                        },
+                    )
+                ]
             )
+            repo = updated[0]
 
         assert repo is not None
         if repo.id not in self.repo_ids:
             self.repo_ids.append(repo.id)
-            self.data.prj_repo.add_repo_id(self.project.id, repo.id)
+            await self.data.project_repo.add_repo_id(self.project.id, repo.id)
+
+        # Update caches
+        self._repos_by_id[repo.id] = repo
+        self._repos_by_name[repo.name] = repo
 
         return repo
 
-    def remove_repo(self, repo_id):
+    async def remove_repo(self, repo_id):
         if repo_id in self.repo_ids:
             self.repo_ids.remove(repo_id)
+        # Remove from caches
+        repo = self._repos_by_id.pop(repo_id, None)
+        if repo is not None:
+            self._repos_by_name.pop(repo.name, None)
 
-        self.data.prj_repo.remove_project_repo(self.project.id, repo_id)
+        # Data-layer removal may not be supported by the abstract interface
+        remover = getattr(getattr(self.data, "project_repo", None), "remove_repo_id", None)
+        if callable(remover):
+            try:
+                await remover(self.project.id, repo_id)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to remove repo association in data layer",
+                    repo_id=repo_id,
+                    exc=exc,
+                )
+        else:
+            logger.debug(
+                "Data repository does not support removing repo associations",
+                repo_id=repo_id,
+            )
 
     # Virtual path helpers
     def construct_virtual_path(self, repo_id: str, path: str) -> str:
         if self.settings.paths.enable_project_paths:
-            repo = self.data.repo.get_by_id(repo_id)
+            repo = self._repos_by_id.get(repo_id)
             if repo is None:
                 raise ValueError("Repository was not found.")
             return op.join(repo.name, path)
@@ -158,7 +213,7 @@ class ProjectManager:
         if repo_id == self.default_repo.id:
             return path
 
-        repo = self.data.repo.get_by_id(repo_id)
+        repo = self._repos_by_id.get(repo_id)
         if repo is None:
             raise ValueError("Repository was not found.")
 
@@ -168,7 +223,7 @@ class ProjectManager:
         if self.settings.paths.enable_project_paths:
             parts = path.split(os.sep, 1)
             repo_name = parts[0]
-            repo = self.data.repo.get_by_name(repo_name)
+            repo = self._repos_by_name.get(repo_name)
 
             if repo and repo.id in self.repo_ids:
                 relative_path = parts[1] if len(parts) > 1 else ""
@@ -183,8 +238,7 @@ class ProjectManager:
         parts = path.split(os.sep, 1)
         if not parts or not parts[0]:
             return None
-
-        repo = self.data.repo.get_by_name(parts[0])
+        repo = self._repos_by_name.get(parts[0])
         if repo is None:
             return None
 
@@ -203,7 +257,7 @@ class ProjectManager:
         return op.join(repo.root_path, relative_path)
 
     # Single repo refresh helper
-    def refresh(
+    async def refresh(
         self,
         repo=None,
         paths: Optional[list[str]] = None,
@@ -214,20 +268,19 @@ class ProjectManager:
 
         from knowlt import scanner
 
-        scan_result = scanner.scan_repo(
+        scan_result = await scanner.scan_repo(
             self, repo, paths=paths, progress_callback=progress_callback
         )
-
-        self.refresh_components(scan_result)
+        await self.refresh_components(scan_result)
         self._last_refresh_time = datetime.datetime.now(datetime.timezone.utc)
 
-    def refresh_all(self) -> None:
+    async def refresh_all(self) -> None:
         """Refresh all repositories in the project."""
-        repos_to_refresh = self.data.repo.get_list_by_ids(self.repo_ids)
+        repos_to_refresh = await self.data.repo.get_by_ids(self.repo_ids)
         for repo in repos_to_refresh:
-            self.refresh(repo)
+            await self.refresh(repo)
 
-    def maybe_refresh(self) -> None:
+    async def maybe_refresh(self) -> None:
         if not self.settings.refresh.enabled:
             return
 
@@ -247,12 +300,12 @@ class ProjectManager:
 
         if self.settings.refresh.refresh_all_repos:
             logger.info("Auto-refreshing all associated repositories...")
-            self.refresh_all()
+            await self.refresh_all()
         else:
             logger.info("Auto-refreshing primary repository...")
-            self.refresh()  # Just refreshes default repo
+            await self.refresh()  # Just refreshes default repo
 
-    def refresh_components(self, scan_result: ScanResult):
+    async def refresh_components(self, scan_result: ScanResult):
         for name, comp in self._components.items():
             try:
                 # TODO: pass repo to refresh
@@ -277,17 +330,17 @@ class ProjectManager:
         return self._components.get(name)
 
     # Embedding helper
-    def compute_embedding(
+    async def compute_embedding(
         self,
         text: str,
     ) -> Optional[Vector]:
         if self.embeddings is None:
             return None
 
-        return self.embeddings.get_embedding(text)
+        return await self.embeddings.get_embedding(text)
 
     # teardown helper
-    def destroy(self, *, timeout: float | None = None) -> None:
+    async def destroy(self, *, timeout: float | None = None) -> None:
         """
         Release every resource held by this Project instance.
         """
@@ -309,22 +362,3 @@ class ProjectManager:
             self.data.close()
         except Exception as exc:
             logger.error("Failed to close data repository", exc=exc)
-
-
-class ProjectCache:
-    """
-    Mutable project-wide cache for expensive/invariant information
-    that code parsers may want to re-use (ex: go.mod content).
-    """
-
-    def __init__(self) -> None:
-        self._cache: dict[str, Any] = {}
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return self._cache.get(key, default)
-
-    def set(self, key: str, value: Any) -> None:
-        self._cache[key] = value
-
-    def clear(self) -> None:
-        self._cache.clear()

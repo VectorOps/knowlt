@@ -20,6 +20,7 @@ dependencies = [
     "pypika",
     "pydantic-settings>=2.10.1",
     "pandas>=2.3.3",
+    "sentence-transformers>=5.1.2",
 ]
 
 [tool.uv]
