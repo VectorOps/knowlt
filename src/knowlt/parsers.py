@@ -247,7 +247,7 @@ class AbstractLanguageHelper:
         with correct identation. For functions and methods, function body is replaced
         with a filler.
         """
-        pass
+        ...
 
     @abstractmethod
     def get_common_syntax_words(self) -> set[str]:

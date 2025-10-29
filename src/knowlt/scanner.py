@@ -37,7 +37,6 @@ from knowlt.embedding_helpers import (
 )
 
 
-
 class ScanProgress(BaseModel):
     repo_id: str
     total_files: int
@@ -395,7 +394,9 @@ async def scan_repo(
         )
         # Mass-schedule in background; do not wait here
         asyncio.create_task(
-            schedule_symbol_embedding(pm.data.node, pm.embeddings, state.pending_embeddings)
+            schedule_symbol_embedding(
+                pm.data.node, pm.embeddings, state.pending_embeddings
+            )
         )
 
     # Refresh any full text indexes
@@ -465,11 +466,6 @@ async def upsert_parsed_file(
     parsed_file: ParsedFile,
     stats: Optional[defaultdict[str, float]] = None,
 ) -> None:
-    """
-    Persist *parsed_file* (package → file → symbols) into the
-    project's data-repository. If an entity already exists it is
-    updated, otherwise it is created (“upsert”).
-    """
     upsert_start_time = time.perf_counter()
 
     # Package
@@ -600,7 +596,7 @@ async def upsert_parsed_file(
 
     nodes_to_create: list[Node] = []
 
-    def _insert_symbol(psym: ParsedNode, parent_id: str | None = None) -> str:
+    def _insert_node(psym: ParsedNode, parent_id: Optional[ModelId] = None) -> str:
         """
         Insert *psym* as Node (recursively handles its children).
         When an old symbol with identical body exists, its embedding vector
@@ -645,26 +641,27 @@ async def upsert_parsed_file(
 
         # recurse into children
         for child in psym.children:
-            _insert_symbol(child, sm.id)
+            _insert_node(child, sm.id)
 
         return sm.id
 
     await node_repo.delete_by_file_ids([file_meta.id])
+
     for sym in parsed_file.symbols:
-        _insert_symbol(sym)
+        _insert_node(sym)
+
     if nodes_to_create:
         await node_repo.create(nodes_to_create)
+
     t_sym = time.perf_counter()
 
-    t_ref = time.perf_counter()
     if stats is not None:
         stats["total_upsert_count"] += 1
-        stats["total_upsert_time"] += t_ref - upsert_start_time
+        stats["total_upsert_time"] += t_sym - upsert_start_time
         stats["upsert_package_time"] += t_pkg - t_start
         stats["upsert_file_time"] += t_file - t_pkg
         stats["upsert_import_edge_time"] += t_imp - t_file
         stats["upsert_symbol_time"] += t_sym - t_imp
-        stats["upsert_symbol_ref_time"] += t_ref - t_sym
 
 
 async def resolve_pending_import_edges(
