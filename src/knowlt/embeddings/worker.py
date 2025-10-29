@@ -180,7 +180,7 @@ class EmbeddingWorker:
 
         key = self._calc_type.lower()
         if key in ("local", "sentence"):
-            from know.embeddings.sentence import LocalEmbeddingCalculator
+            from knowlt.embeddings.sentence import LocalEmbeddingCalculator
 
             return LocalEmbeddingCalculator(
                 model_name=self._model_name,
