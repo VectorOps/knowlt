@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Optional, List, Callable
+from typing import Optional, List, Callable, Dict
 
 import tree_sitter as ts
 import tree_sitter_python as tspython
@@ -36,6 +36,9 @@ class PythonCodeParser(AbstractCodeParser):
     def __init__(self, pm: ProjectManager, repo: Repo, rel_path: str) -> None:
         super().__init__(pm, repo, rel_path)
         self.parser = _get_parser()
+        # Cache frequently re-used values per instance
+        self._project_root: Path = Path(self.repo.root_path).resolve()
+        self._module_path_cache: Dict[str, Optional[Path]] = {}
         lang_settings = self.pm.settings.languages.get(
             self.language.value, PythonSettings()
         )
@@ -86,6 +89,35 @@ class PythonCodeParser(AbstractCodeParser):
         self._debug_unknown_node(node)
         return [self._literal_node(node)]
 
+    # Small helpers to reduce duplication
+    def _gather_decorators(self, wrapper: ts.Node) -> List[str]:
+        return [
+            (get_node_text(c) or "").strip()
+            for c in wrapper.children
+            if c.type == "decorator"
+        ]
+
+    def _collect_def_metadata(self, node: ts.Node, base_header: str) -> tuple[str, Optional[str], Optional[str]]:
+        # If wrapped in a decorated_definition, use it to collect decorator lines
+        wrapper = node.parent if (node.parent is not None and node.parent.type == "decorated_definition") else node
+        decorators = self._gather_decorators(wrapper) if wrapper is not node else []
+        header = (f'{"\n".join(decorators)}\n{base_header}' if decorators else base_header)
+        comment = self._get_preceding_comment(wrapper)
+        doc = self._extract_docstring(node)
+        return header, comment, doc
+
+    def _build_block(self, block_node: ts.Node, subtype: str, header_text: Optional[str], parent: ParsedNode) -> None:
+        blk = self._make_node(
+            block_node,
+            kind=NodeKind.BLOCK,
+            name=None,
+            header=header_text,
+            subtype=subtype,
+        )
+        for ch in block_node.children:
+            blk.children.extend(self._process_node(ch, parent=blk))
+        parent.children.append(blk)
+
     # Handlers
     def _handle_import(
         self, node: ts.Node, parent: Optional[ParsedNode]
@@ -122,10 +154,12 @@ class PythonCodeParser(AbstractCodeParser):
                 alias_node = aliased.child_by_field_name("alias")
                 alias = get_node_text(alias_node) or None
         stripped = (import_path or "").lstrip(".")
-        is_local = bool(stripped) and self._is_local_import(stripped)
-        resolved_path: Optional[str] = None
-        if is_local:
-            resolved_path = self._resolve_local_import_path(stripped)
+        # Resolve once to avoid duplicate FS checks
+        resolved_obj: Optional[Path] = self._locate_module_path(stripped) if stripped else None
+        is_local = resolved_obj is not None
+        resolved_path: Optional[str] = (
+            resolved_obj.relative_to(self._project_root).as_posix() if resolved_obj is not None else None
+        )
         assert self.parsed_file is not None
         self.parsed_file.imports.append(
             ParsedImportEdge(
@@ -156,25 +190,9 @@ class PythonCodeParser(AbstractCodeParser):
         if name_node is None:
             return []
         fn_name = get_node_text(name_node)
-        # If wrapped in a decorated_definition, use it to collect decorator lines
-        wrapper = (
-            node.parent
-            if (node.parent is not None and node.parent.type == "decorated_definition")
-            else node
-        )
         base_header = self._build_function_header(node)
-        decorator_texts: List[str] = [
-            (get_node_text(c) or "").strip()
-            for c in wrapper.children
-            if c.type == "decorator"
-        ] if wrapper is not node else []
-        header = (
-            f'{"\n".join(decorator_texts)}\n{base_header}'
-            if decorator_texts
-            else base_header
-        )
-        comment = self._get_preceding_comment(wrapper)
-        doc = self._extract_docstring(node)
+        print(base_header)
+        header, comment, doc = self._collect_def_metadata(node, base_header)
         kind = (
             NodeKind.METHOD
             if parent and parent.kind == NodeKind.CLASS
@@ -192,25 +210,8 @@ class PythonCodeParser(AbstractCodeParser):
         if name_node is None:
             return []
         cls_name = get_node_text(name_node)
-        # If wrapped in a decorated_definition, use it to collect decorator lines
-        wrapper = (
-            node.parent
-            if (node.parent is not None and node.parent.type == "decorated_definition")
-            else node
-        )
         base_header = self._build_class_header(node)
-        decorator_texts: List[str] = [
-            (get_node_text(c) or "").strip()
-            for c in wrapper.children
-            if c.type == "decorator"
-        ] if wrapper is not node else []
-        header = (
-            f'{"\n".join(decorator_texts)}\n{base_header}'
-            if decorator_texts
-            else base_header
-        )
-        comment = self._get_preceding_comment(wrapper)
-        doc = self._extract_docstring(node)
+        header, comment, doc = self._collect_def_metadata(node, base_header)
         cls = self._make_node(
             node,
             kind=NodeKind.CLASS,
@@ -260,26 +261,12 @@ class PythonCodeParser(AbstractCodeParser):
         chain = self._make_node(
             node, kind=NodeKind.CUSTOM, name=None, header=None, subtype="if"
         )
-
-        def add_block(block_node: ts.Node, subtype: str, header_text: Optional[str]) -> None:
-            # BLOCK child; header includes condition (if/elif) or 'else:'
-            blk = self._make_node(
-                block_node,
-                kind=NodeKind.BLOCK,
-                name=None,
-                header=header_text,
-                subtype=subtype,
-            )
-            for ch in block_node.children:
-                blk.children.extend(self._process_node(ch, parent=blk))
-            chain.children.append(blk)
-
         # if <condition>: <consequence>
         cons = node.child_by_field_name("consequence")
         cond_node = node.child_by_field_name("condition")
         if cons is not None:
             cond_text = (get_node_text(cond_node) or "").strip()
-            add_block(cons, "if", f"if {cond_text}:")
+            self._build_block(cons, "if", f"if {cond_text}:", chain)
 
         # elif / else clauses
         for alt in node.children:
@@ -287,13 +274,13 @@ class PythonCodeParser(AbstractCodeParser):
                 block = alt.child_by_field_name("consequence")
                 if block is not None:
                     elif_cond = (get_node_text(alt.child_by_field_name("condition")) or "").strip()
-                    add_block(block, "elif", f"elif {elif_cond}:")
+                    self._build_block(block, "elif", f"elif {elif_cond}:", chain)
             elif alt.type == "else_clause":
                 block = alt.child_by_field_name("body") or alt.child_by_field_name(
                     "consequence"
                 )
                 if block is not None:
-                    add_block(block, "else", "else:")
+                    self._build_block(block, "else", "else:", chain)
         return [chain]
 
     def _handle_try(
@@ -303,31 +290,21 @@ class PythonCodeParser(AbstractCodeParser):
         tryn = self._make_node(
             node, kind=NodeKind.CUSTOM, name=None, header=None, subtype="try"
         )
-
-        def add_block(block_node: ts.Node, subtype: str) -> None:
-            # BLOCK child; no header for non-def constructs; use subtype to differentiate
-            blk = self._make_node(
-                block_node, kind=NodeKind.BLOCK, name=None, header=None, subtype=subtype
-            )
-            for ch in block_node.children:
-                blk.children.extend(self._process_node(ch, parent=blk))
-            tryn.children.append(blk)
-
         for ch in node.children:
             if ch.type == "block":
-                add_block(ch, "try")
+                self._build_block(ch, "try", None, tryn)
             elif ch.type == "except_clause":
                 blk = next((c for c in ch.children if c.type == "block"), None)
                 if blk is not None:
-                    add_block(blk, "except")
+                    self._build_block(blk, "except", None, tryn)
             elif ch.type == "else_clause":
                 blk = next((c for c in ch.children if c.type == "block"), None)
                 if blk is not None:
-                    add_block(blk, "else")
+                    self._build_block(blk, "else", None, tryn)
             elif ch.type == "finally_clause":
                 blk = next((c for c in ch.children if c.type == "block"), None)
                 if blk is not None:
-                    add_block(blk, "finally")
+                    self._build_block(blk, "finally", None, tryn)
         return [tryn]
 
     def _handle_comment(
@@ -351,10 +328,24 @@ class PythonCodeParser(AbstractCodeParser):
     def _literal_node(self, node: ts.Node) -> ParsedNode:
         return self._make_node(node, kind=NodeKind.LITERAL, name=None, header=None)
 
+    def _is_async_function_node(self, node: ts.Node) -> bool:
+        # Direct async function
+        if node.type == "async_function_definition":
+            return True
+
+        # bug-work-around: async method wrongly tagged as function_definition
+        if node.type == "function_definition" and get_node_text(node).startswith("async "):
+            return True
+
+        if node.type == "decorated_definition":
+            # recurse into wrapped child/children
+            return any(self._is_async_function(c) for c in node.children)
+
+        return False
+
     def _build_function_header(self, node: ts.Node) -> str:
-        is_async = node.type == "async_function_definition" or (
-            get_node_text(node) or ""
-        ).lstrip().startswith("async def")
+        # Detect async, including decorated async functions
+        is_async = self._is_async_function_node(node)
         name_node = node.child_by_field_name("name")
         params_node = node.child_by_field_name("parameters")
         ret_node = node.child_by_field_name("return_type")
@@ -381,7 +372,12 @@ class PythonCodeParser(AbstractCodeParser):
         return code[idx:].strip()
 
     def _extract_docstring(self, node: ts.Node) -> Optional[str]:
-        if node.type in ("function_definition", "class_definition"):
+        # Support docstrings for regular and async functions/classes
+        if node.type in (
+            "function_definition",
+            "async_function_definition",
+            "class_definition",
+        ):
             block = next((c for c in node.children if c.type == "block"), None)
             if block is not None:
                 return self._extract_docstring(block)
@@ -423,11 +419,14 @@ class PythonCodeParser(AbstractCodeParser):
     def _locate_module_path(self, import_path: str) -> Optional[Path]:
         if not import_path:
             return None
-        project_root = Path(self.repo.root_path).resolve()
+        # Cached FS lookup
+        cached = self._module_path_cache.get(import_path)
+        if cached is not None or import_path in self._module_path_cache:
+            return cached
         parts = import_path.split(".")
         found: Optional[Path] = None
         for idx in range(1, len(parts) + 1):
-            base = project_root.joinpath(*parts[:idx])
+            base = self._project_root.joinpath(*parts[:idx])
             if any(seg in self.settings.venv_dirs for seg in base.parts):
                 continue
             for suffix in self.settings.module_suffixes:
@@ -438,14 +437,15 @@ class PythonCodeParser(AbstractCodeParser):
             else:
                 if base.is_dir() and (base / "__init__.py").exists():
                     found = base / "__init__.py"
+        # Store even negative results to avoid repeated scans within a file
+        self._module_path_cache[import_path] = found
         return found
 
     def _resolve_local_import_path(self, import_path: str) -> Optional[str]:
         path_obj = self._locate_module_path(import_path)
         if path_obj is None:
             return None
-        project_root = Path(self.repo.root_path).resolve()
-        return path_obj.relative_to(project_root).as_posix()
+        return path_obj.relative_to(self._project_root).as_posix()
 
     def _is_local_import(self, import_path: str) -> bool:
         return self._locate_module_path(import_path) is not None
