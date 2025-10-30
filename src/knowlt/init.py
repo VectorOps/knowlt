@@ -6,7 +6,9 @@ from knowlt.data import AbstractDataRepository
 from knowlt import scanner
 
 
-def init_project(settings: ProjectSettings, refresh: bool = True) -> ProjectManager:
+async def init_project(
+    settings: ProjectSettings, refresh: bool = True
+) -> ProjectManager:
     """
     Initializes the project. Settings object contains project path and/or project id.
     Then init project checks if Repo exists for the id (if provided) or absolute path.
@@ -32,7 +34,7 @@ def init_project(settings: ProjectSettings, refresh: bool = True) -> ProjectMana
             batch_size=settings.embedding.batch_size,
         )
 
-    pm = ProjectManager(
+    pm = await ProjectManager.create(
         settings,
         data,
         embeddings=embeddings,
@@ -40,8 +42,6 @@ def init_project(settings: ProjectSettings, refresh: bool = True) -> ProjectMana
 
     # Recursively scan the project directory and parse source files
     if refresh:
-        pm.refresh()
-        # enqueue embeddings for symbols that still miss them
-        scanner.schedule_missing_embeddings(pm, pm.default_repo)
+        await pm.refresh()
 
     return pm

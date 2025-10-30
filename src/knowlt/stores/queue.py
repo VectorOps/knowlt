@@ -24,7 +24,6 @@ class BaseQueueWorker(ABC):
             self._initialize_worker()
             self._init_future.set_result(True)
         except Exception as ex:
-            print("FAILED", ex)
             self._init_future.set_exception(ex)
             return
 
