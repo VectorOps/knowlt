@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS files (
     package_id TEXT,
     path TEXT,
     file_hash TEXT,
-    last_updated DOUBLE,
+    last_updated BIGINT,
 );
 
 CREATE TABLE IF NOT EXISTS nodes (
