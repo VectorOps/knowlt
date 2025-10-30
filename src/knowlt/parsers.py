@@ -101,7 +101,7 @@ class ParsedFile(BaseModel):
     docstring: Optional[str] = None
 
     file_hash: Optional[str] = None
-    last_updated: Optional[float] = None
+    last_updated: Optional[int] = None
 
     nodes: List[ParsedNode] = Field(default_factory=list)
     imports: List[ParsedImportEdge] = Field(default_factory=list)
@@ -164,7 +164,7 @@ class AbstractCodeParser(ABC):
             raise ValueError("repo.root_path must be set to parse files")
 
         file_path = os.path.join(self.repo.root_path, self.rel_path)
-        mtime: float = os.path.getmtime(file_path)
+        mtime_ns: int = os.stat(file_path).st_mtime_ns
         with open(file_path, "rb") as file:
             self.source_bytes = file.read()
 
@@ -172,7 +172,7 @@ class AbstractCodeParser(ABC):
         root_node = tree.root_node
 
         self.package = self._create_package(root_node)
-        self.parsed_file = self._create_file(file_path, mtime)
+        self.parsed_file = self._create_file(file_path, mtime_ns)
 
         # Traverse the syntax tree and populate Parsed structures
         for child in root_node.children:
@@ -205,12 +205,12 @@ class AbstractCodeParser(ABC):
             imports=[],
         )
 
-    def _create_file(self, file_path, mtime):
+    def _create_file(self, file_path, mtime_ns):
         return ParsedFile(
             package=self.package,
             path=self.rel_path,
             file_hash=compute_file_hash(file_path),
-            last_updated=mtime,
+            last_updated=mtime_ns,
             nodes=[],
             imports=[],
         )

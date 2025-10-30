@@ -102,7 +102,7 @@ class File(BaseModel):
 
     path: str  # project relative path
     file_hash: Optional[str] = None
-    last_updated: Optional[float] = None  # POSIX mtime (seconds)
+    last_updated: Optional[int] = None  # POSIX mtime in nanoseconds (st_mtime_ns)
 
     # Runtime links
     package: Optional[Package] = Field(default=None, exclude=True, repr=False)

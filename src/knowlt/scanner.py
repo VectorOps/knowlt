@@ -70,7 +70,7 @@ class ProcessFileResult:
     parsed_file: Optional[ParsedFile] = None
     existing_meta: Optional[File] = None
     file_hash: Optional[str] = None
-    mod_time: Optional[float] = None
+    mod_time: Optional[int] = None
     exception: Optional[Exception] = None
 
 
@@ -126,7 +126,7 @@ def _process_file(
                 status=ProcessFileStatus.SKIPPED, duration=duration, suffix=suffix
             )
 
-        mod_time = p.path.stat().st_mtime
+        mod_time = p.path.stat().st_mtime_ns
         if p.existing_meta and p.existing_meta.last_updated == mod_time:
             duration = time.perf_counter() - file_proc_start
             return ProcessFileResult(
