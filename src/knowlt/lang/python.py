@@ -137,7 +137,17 @@ class PythonCodeParser(AbstractCodeParser):
                 raw=raw_stmt,
             )
         )
-        return []
+        # Also return a node so summaries can include import statements.
+        # Use a LITERAL node with subtype "import" and the raw body.
+        imp_node = self._make_node(
+            node,
+            kind=NodeKind.LITERAL,
+            name=None,
+            header=None,
+            subtype="import",
+        )
+        imp_node.comment = self._get_preceding_comment(node)
+        return [imp_node]
 
     def _handle_function(
         self, node: ts.Node, parent: Optional[ParsedNode]
@@ -210,11 +220,11 @@ class PythonCodeParser(AbstractCodeParser):
             docstring=doc,
         )
         block = next((c for c in node.children if c.type == "block"), None)
-        if block is not None:
-            for child in block.children:
-                subnodes = child.children if child.type == "statement" else (child,)
-                for n in subnodes:
-                    cls.children.extend(self._process_node(n, parent=cls))
+        body_children = block.children if block is not None else node.children
+
+        for child in body_children:
+            cls.children.extend(self._process_node(child, parent=cls))
+
         return [cls]
 
     def _handle_decorated_definition(
@@ -246,34 +256,44 @@ class PythonCodeParser(AbstractCodeParser):
     def _handle_if(
         self, node: ts.Node, parent: Optional[ParsedNode]
     ) -> List[ParsedNode]:
-        # CUSTOM parent for the whole chain; no header for non-def constructs
+        # CUSTOM parent for the whole chain
         chain = self._make_node(
             node, kind=NodeKind.CUSTOM, name=None, header=None, subtype="if"
         )
 
-        def add_block(block_node: ts.Node, subtype: str) -> None:
-            # BLOCK child; no header for non-def constructs; use subtype to differentiate
+        def add_block(block_node: ts.Node, subtype: str, header_text: Optional[str]) -> None:
+            # BLOCK child; header includes condition (if/elif) or 'else:'
             blk = self._make_node(
-                block_node, kind=NodeKind.BLOCK, name=None, header=None, subtype=subtype
+                block_node,
+                kind=NodeKind.BLOCK,
+                name=None,
+                header=header_text,
+                subtype=subtype,
             )
             for ch in block_node.children:
                 blk.children.extend(self._process_node(ch, parent=blk))
             chain.children.append(blk)
 
+        # if <condition>: <consequence>
         cons = node.child_by_field_name("consequence")
+        cond_node = node.child_by_field_name("condition")
         if cons is not None:
-            add_block(cons, "if")
+            cond_text = (get_node_text(cond_node) or "").strip()
+            add_block(cons, "if", f"if {cond_text}:")
+
+        # elif / else clauses
         for alt in node.children:
             if alt.type == "elif_clause":
                 block = alt.child_by_field_name("consequence")
                 if block is not None:
-                    add_block(block, "elif")
+                    elif_cond = (get_node_text(alt.child_by_field_name("condition")) or "").strip()
+                    add_block(block, "elif", f"elif {elif_cond}:")
             elif alt.type == "else_clause":
                 block = alt.child_by_field_name("body") or alt.child_by_field_name(
                     "consequence"
                 )
                 if block is not None:
-                    add_block(block, "else")
+                    add_block(block, "else", "else:")
         return [chain]
 
     def _handle_try(
@@ -453,25 +473,81 @@ class PythonLanguageHelper(AbstractLanguageHelper):
     ) -> str:
         IND = " " * indent
         lines: List[str] = []
+
+        def emit_children(children: List[Node], child_indent: int) -> None:
+            for ch in children:
+                ch_sum = self.get_node_summary(
+                    ch,
+                    indent=child_indent,
+                    include_comments=include_comments,
+                    include_docs=include_docs,
+                )
+                if ch_sum:
+                    lines.append(ch_sum)
+
+        # Optional preceding comments
         if include_comments and sym.comment:
             for ln in (sym.comment or "").splitlines():
-                lines.append(f"{IND}{ln.rstrip()}")
-        # Only definitions print header + ellipsis
+                lines.append(f"{IND}{ln.strip()}")
+
+        # Definitions: emit header and then either children or ellipsis
         if sym.kind in (NodeKind.CLASS, NodeKind.FUNCTION, NodeKind.METHOD):
-            header = sym.header or (
-                f"class {sym.name}:"
-                if sym.kind == NodeKind.CLASS
-                else f"def {sym.name}:"
-            )
-            if not header.endswith(":"):
-                header += ":"
-            lines.append(f"{IND}{header}")
+            header = sym.header or ""
+            if header and not header.endswith(":"):
+                header = f"{header}:"
+            if header:
+                for ln in header.splitlines():
+                    lines.append(f"{IND}{ln.strip()}")
             if include_docs and sym.docstring:
                 for ln in (sym.docstring or "").splitlines():
-                    lines.append(f"{IND}    {ln.rstrip()}")
-            lines.append(f"{IND}    ...")
+                    lines.append(f"{IND}    {ln.strip()}")
+            if sym.children:
+                emit_children(sym.children, indent + 4)
+            else:
+                lines.append(f"{IND}    ...")
             return "\n".join(lines)
-        # Non-definition nodes: print body
+
+        # Special handling for if/elif/else chains
+        if sym.kind == NodeKind.CUSTOM and (sym.subtype or "") == "if":
+            # children are BLOCK nodes with subtype in {"if","elif","else"}
+            for blk in sym.children:
+                label = (blk.subtype or "").lower()
+                if label in {"if", "elif", "else"}:
+                    header_line = (blk.header or f"{label}:").strip()
+                    lines.append(f"{IND}{header_line}")
+                    emit_children(blk.children, indent + 4)
+                else:
+                    # Fallback if unexpected subtype
+                    lines.append(f"{IND}if:")
+                    emit_children(blk.children, indent + 4)
+            return "\n".join(lines)
+
+        # Special handling for try/except/else/finally
+        if sym.kind == NodeKind.CUSTOM and (sym.subtype or "") == "try":
+            for blk in sym.children:
+                label = (blk.subtype or "").lower()
+                if label in {"try", "except", "else", "finally"}:
+                    lines.append(f"{IND}{label}:")
+                    emit_children(blk.children, indent + 4)
+                else:
+                    # Fallback if unexpected subtype
+                    lines.append(f"{IND}try:")
+                    emit_children(blk.children, indent + 4)
+            return "\n".join(lines)
+
+        # If summarizing a BLOCK standalone (outside parent handlers), emit its subtype header then children
+        if sym.kind == NodeKind.BLOCK and sym.children:
+            label = (sym.subtype or "block").lower()
+            lines.append(f"{IND}{label}:")
+            emit_children(sym.children, indent + 4)
+            return "\n".join(lines)
+
+        # Generic: if there are children but no special header, recurse
+        if sym.children:
+            emit_children(sym.children, indent)
+            return "\n".join(lines)
+
+        # Leaf: print available body
         body = (sym.body or "").strip()
         if body:
             lines.append(f"{IND}{body}")
@@ -509,13 +585,3 @@ class PythonLanguageHelper(AbstractLanguageHelper):
             "with",
             "self",
         }
-
-    def get_import_summary(self, imp: ImportEdge) -> str:
-        if imp.raw:
-            return imp.raw.strip()
-        path = imp.to_package_virtual_path or ""
-        alias = f" as {imp.alias}" if imp.alias else ""
-        if imp.dot:
-            leading = "." if not path.startswith(".") else ""
-            return f"from {leading}{path} import *{alias}".strip()
-        return f"import {path}{alias}".strip()

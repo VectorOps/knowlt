@@ -111,8 +111,6 @@ async def post_process_search_results(
     - Includes direct descendants of the final results.
     - Designed to allow for future inclusion of reranking models.
     """
-    # from devtools import pprint; pprint(results)
-
     # Filter out nodes that are parents of other nodes in the result set
     all_ids = {n.id for n in results}
     parent_ids_in_results = {
