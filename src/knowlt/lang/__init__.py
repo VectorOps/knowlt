@@ -1,1 +1,1 @@
-from . import python, text, markdown
+from . import python, text, markdown, golang

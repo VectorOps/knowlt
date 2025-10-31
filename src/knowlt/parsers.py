@@ -225,11 +225,12 @@ class AbstractCodeParser(ABC):
         subtype: Optional[str] = None,
         comment: Optional[str] = None,
         docstring: Optional[str] = None,
+        body: Optional[str] = None,
     ) -> ParsedNode:
         """
         Construct a ParsedNode from a tree-sitter node with common fields.
         """
-        text = get_node_text(node) or ""
+        text = body if body is not None else (get_node_text(node) or "")
         return ParsedNode(
             name=name,
             body=text,
