@@ -267,6 +267,7 @@ class AbstractLanguageHelper:
         indent: int = 0,
         include_comments: bool = False,
         include_docs: bool = False,
+        include_parents: bool = False,
     ) -> str:
         """
         Generate symbol summary (comment, definition and a docstring if available) as a string
