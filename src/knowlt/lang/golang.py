@@ -223,7 +223,7 @@ class GolangCodeParser(AbstractCodeParser):
             name=None,
             header=None,
             subtype="import",
-            comment=self._get_preceding_comment(node),
+            docstring=self._get_preceding_comment(node),
         )
         return [imp_node]
 
@@ -330,7 +330,7 @@ class GolangCodeParser(AbstractCodeParser):
         header = self._build_header(node, "func")
         comment = self._get_preceding_comment(node)
         sym = self._make_node(
-            node, kind=NodeKind.FUNCTION, name=name, header=header, comment=comment
+            node, kind=NodeKind.FUNCTION, name=name, header=header, docstring=comment
         )
         return [sym]
 
@@ -347,7 +347,7 @@ class GolangCodeParser(AbstractCodeParser):
         header = self._build_header(node, "func")
         comment = self._get_preceding_comment(node)
         sym = self._make_node(
-            node, kind=NodeKind.METHOD, name=name, header=header, comment=comment
+            node, kind=NodeKind.METHOD, name=name, header=header, docstring=comment
         )
         return [sym]
 
@@ -382,7 +382,9 @@ class GolangCodeParser(AbstractCodeParser):
 
             name = get_node_text(ident)
             header = self._build_header(spec, "type")
-            comment = self._get_preceding_comment(spec)
+            comment = self._get_preceding_comment(spec) or self._get_preceding_comment(
+                node
+            )
             subtype = None
             type_node = next(
                 (
@@ -408,6 +410,7 @@ class GolangCodeParser(AbstractCodeParser):
                 elif type_node.type == "type_identifier":
                     kind = NodeKind.LITERAL
                     header = None
+
             # Ensure the body includes the full type declaration text.
             # type_spec nodes don't include the 'type' keyword; synthesize it.
             spec_text = (get_node_text(spec) or "").lstrip()
@@ -421,7 +424,7 @@ class GolangCodeParser(AbstractCodeParser):
                 kind=kind,
                 name=name,
                 header=header,
-                comment=comment,
+                docstring=comment,
                 subtype=subtype,
                 body=full_body,
             )
@@ -449,13 +452,6 @@ class GolangCodeParser(AbstractCodeParser):
                     allowed_struct if type_node.type == "struct_type" else allowed_iface
                 )
                 for ch in type_node.children:
-                    print(
-                        get_node_text(ch),
-                        ch,
-                        ch.type,
-                        ch.type in allowed,
-                        ch.type in ignore_tokens,
-                    )
                     if ch.type in allowed:
                         sym.children.extend(self._process_node(ch, sym))
                     elif ch.type in ignore_tokens:
@@ -515,7 +511,7 @@ class GolangCodeParser(AbstractCodeParser):
                 node,
                 kind=NodeKind.PROPERTY,
                 name=name,
-                comment=self._get_preceding_comment(node),
+                docstring=self._get_preceding_comment(node),
             )
         ]
 
@@ -537,7 +533,7 @@ class GolangCodeParser(AbstractCodeParser):
                 node,
                 kind=NodeKind.PROPERTY,
                 name=name,
-                comment=self._get_preceding_comment(node),
+                docstring=self._get_preceding_comment(node),
             )
         ]
 
@@ -554,7 +550,7 @@ class GolangCodeParser(AbstractCodeParser):
                 node,
                 kind=NodeKind.PROPERTY,
                 name=None,
-                comment=self._get_preceding_comment(node),
+                docstring=self._get_preceding_comment(node),
             )
         ]
 
@@ -607,6 +603,10 @@ class GolangLanguageHelper(AbstractLanguageHelper):
         include_parents: bool = False,
         child_stack: Optional[List[List[Node]]] = None,
     ) -> str:
+        # Suppress standalone comment nodes when documentation is requested
+        if include_docs and sym.kind == NodeKind.COMMENT:
+            return ""
+
         if include_parents:
             if sym.parent_ref:
                 return self.get_node_summary(
@@ -657,12 +657,12 @@ class GolangLanguageHelper(AbstractLanguageHelper):
                 and not header.endswith("{")
             ):
                 header = f"{header} {{"
+            if include_docs and sym.docstring:
+                for ln in sym.docstring.splitlines():
+                    lines.append(f"{IND}{ln.strip()}")
             if header:
                 for ln in header.splitlines():
                     lines.append(f"{IND}{ln.strip()}")
-            if include_docs and getattr(sym, "docstring", None):
-                for ln in (sym.docstring or "").splitlines():
-                    lines.append(f"{IND}\t{ln.strip()}")
             if sym.children:
                 emit_children(sym.children, indent + 1)
             else:
@@ -680,6 +680,9 @@ class GolangLanguageHelper(AbstractLanguageHelper):
             emit_children(sym.children, indent)
             return "\n".join(lines)
 
+        if include_docs and sym.docstring:
+            for ln in sym.docstring.splitlines():
+                lines.append(f"{IND}{ln.strip()}")
         body = (sym.body or "").strip()
         if body:
             lines.append(f"{IND}{body}")

@@ -1,0 +1,5 @@
+#+title: Know Lite
+* [ ] Parsers
+** [ ] Rethink comments vs docstrings logic. Maybe combine include_comments and include_docs.
+For languages that don't have explicit docstrings (like Go) current implementation makes it
+hard to generate file summaries with comments as individual nodes and as a comment field.
