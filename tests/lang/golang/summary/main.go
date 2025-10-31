@@ -12,6 +12,7 @@ var (
 	k = "123"
 	f = 0.1 // Hello
 )
+
 // Simple type alias
 type Foobar = int
 type E struct {
@@ -31,12 +32,14 @@ type I interface {
 	// comment
 	b(s str)
 }
+
 /*
 Just a comment
 */
 func dummy(a int) (int, error) {
 	...
 }
+
 // Test comment
 func main() {
 	...
