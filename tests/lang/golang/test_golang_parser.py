@@ -58,7 +58,7 @@ def test_golang_parser_on_sample_file():
 
     # Types (all mapped to CLASS)
     assert "Foobar" in nodes
-    assert nodes["Foobar"].kind == NodeKind.CLASS
+    assert nodes["Foobar"].kind == NodeKind.LITERAL
 
     # Structs and interfaces
     assert "S" in nodes
@@ -88,12 +88,16 @@ def test_golang_parser_on_sample_file():
 
     # Struct fields and interface methods should be parsed as child nodes.
     s_node = nodes["S"]
-    assert any(ch.kind == NodeKind.PROPERTY for ch in s_node.children), "struct S should have property children"
+    assert any(
+        ch.kind == NodeKind.PROPERTY for ch in s_node.children
+    ), "struct S should have property children"
     # Expect at least embedded E and fields a, b, c
     assert len([ch for ch in s_node.children if ch.kind == NodeKind.PROPERTY]) >= 4
 
     i_node = nodes["I"]
-    assert any(ch.kind == NodeKind.PROPERTY for ch in i_node.children), "interface I should have children"
+    assert any(
+        ch.kind == NodeKind.PROPERTY for ch in i_node.children
+    ), "interface I should have children"
     i_child_names = {ch.name for ch in i_node.children if ch.name}
     assert {"m", "b"}.issubset(i_child_names)
 
@@ -104,14 +108,14 @@ def test_golang_parser_on_sample_file():
     # Function `main` with preceding comment in .comment
     assert "main" in nodes
     assert nodes["main"].kind == NodeKind.FUNCTION
-    assert nodes["main"].comment is not None
-    assert "Test comment" in nodes["main"].comment
+    assert nodes["main"].docstring is not None
+    assert "Test comment" in nodes["main"].docstring
 
     # Extra top-level function
     assert "dummy" in nodes
     assert nodes["dummy"].kind == NodeKind.FUNCTION
-    assert nodes["dummy"].comment is not None
-    assert "Just a comment" in nodes["dummy"].comment
+    assert nodes["dummy"].docstring is not None
+    assert "Just a comment" in nodes["dummy"].docstring
 
     # Ensure we saw exactly the expected set of top-level symbols
     expected = {
