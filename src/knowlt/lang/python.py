@@ -191,7 +191,6 @@ class PythonCodeParser(AbstractCodeParser):
             return []
         fn_name = get_node_text(name_node)
         base_header = self._build_function_header(node)
-        print(base_header)
         header, comment, doc = self._collect_def_metadata(node, base_header)
         kind = (
             NodeKind.METHOD
@@ -470,12 +469,41 @@ class PythonLanguageHelper(AbstractLanguageHelper):
         indent: int = 0,
         include_comments: bool = False,
         include_docs: bool = False,
+        include_parents: bool = False,
+        child_stack: Optional[List[List[Node]]] = None,
     ) -> str:
+        # Get to the top of the stack and then generate symbols down
+        if include_parents:
+            if sym.parent_ref:
+                return self.get_node_summary(
+                    sym.parent_ref,
+                    indent,
+                    include_comments,
+                    include_docs,
+                    include_parents,
+                    (child_stack or []) + [[sym]])
+            else:
+                include_parents = False
+
+        only_children = child_stack.pop() if child_stack else None
+
+        # Generate indent
         IND = " " * indent
         lines: List[str] = []
 
         def emit_children(children: List[Node], child_indent: int) -> None:
+            if only_children:
+                lines.append(f"{IND}    ...")
+
+            body_symbols_added = False
+
             for ch in children:
+                if only_children and ch not in only_children:
+                    continue
+
+                if not include_comments and ch.kind == NodeKind.COMMENT:
+                    continue
+
                 ch_sum = self.get_node_summary(
                     ch,
                     indent=child_indent,
@@ -484,6 +512,10 @@ class PythonLanguageHelper(AbstractLanguageHelper):
                 )
                 if ch_sum:
                     lines.append(ch_sum)
+                    body_symbols_added = True
+
+            if not body_symbols_added:
+                lines.append(f"{IND}    ...")
 
         # Optional preceding comments
         if include_comments and sym.comment:
