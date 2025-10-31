@@ -1,1 +1,1 @@
-from . import python  # ensure parser/helper registration
+from . import python, text
