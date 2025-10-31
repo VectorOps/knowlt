@@ -43,11 +43,15 @@ class GolangCodeParser(AbstractCodeParser):
         self._handlers: dict[
             str, Callable[[ts.Node, Optional[ParsedNode]], List[ParsedNode]]
         ] = {
+            # file/package
+            "package_clause": self._handle_package_clause,
             # top-level
             "import_declaration": self._handle_import,
             "function_declaration": self._handle_function,
             "method_declaration": self._handle_method,
             "type_declaration": self._handle_type,
+            "var_declaration": self._node_kind_handler(NodeKind.VARIABLE),
+            "const_declaration": self._node_kind_handler(NodeKind.CONST),
             "comment": self._handle_comment,
             # struct/interface members
             "field_declaration": self._handle_field_declaration,
@@ -61,6 +65,26 @@ class GolangCodeParser(AbstractCodeParser):
             "type_element_list": self._handle_type_element_list,
             "method_spec_list": self._handle_method_spec_list,
         }
+
+    # --- simple handler helpers ---------------------------------------
+    def _handle_package_clause(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
+        # Treat package line as a literal node
+        return [self._literal_node(node)]
+
+    def _node_kind_handler(
+        self, kind: NodeKind
+    ) -> Callable[[ts.Node, Optional[ParsedNode]], List[ParsedNode]]:
+        # Factory for simple nodes (no name/header) with optional preceding doc comment
+        def _handler(node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+            return [
+                self._make_node(
+                    node, kind=kind, docstring=self._get_preceding_comment(node)
+                )
+            ]
+
+        return _handler
 
     def parse(self, cache: ProjectCache):
         self._load_module_path(cache)
@@ -215,6 +239,10 @@ class GolangCodeParser(AbstractCodeParser):
                     self._process_import_spec(child)
                 elif child.type == "import_spec_list":
                     _walk(child)
+                else:
+                    self._debug_unknown_node(
+                        child, context="import.walk", parent_type=n.type
+                    )
 
         _walk(node)
         imp_node = self._make_node(
@@ -242,6 +270,10 @@ class GolangCodeParser(AbstractCodeParser):
                 alias = "_"
             elif ch.type == "interpreted_string_literal":
                 import_path = get_node_text(ch).strip()
+            else:
+                self._debug_unknown_node(
+                    ch, context="import.spec", parent_type=spec_node.type
+                )
         if import_path is None:
             return
         if import_path and import_path[0] in '"`' and import_path[-1] in '"`':
@@ -361,6 +393,10 @@ class GolangCodeParser(AbstractCodeParser):
                     acc.append(ch)
                 elif ch.type in ("type_spec_list",):
                     _collect_specs(ch, acc)
+                else:
+                    self._debug_unknown_node(
+                        ch, context="type.collect_specs", parent_type=n.type
+                    )
 
         specs: List[ts.Node] = []
         _collect_specs(node, specs)
@@ -401,13 +437,15 @@ class GolangCodeParser(AbstractCodeParser):
             )
 
             kind = NodeKind.CLASS
+            is_type_ident = False
 
             if type_node is not None:
                 if type_node.type == "interface_type":
                     subtype = "interface"
                 elif type_node.type == "struct_type":
                     subtype = "struct"
-                elif type_node.type == "type_identifier":
+                else:
+                    is_type_ident = True
                     kind = NodeKind.LITERAL
                     header = None
 
@@ -429,7 +467,7 @@ class GolangCodeParser(AbstractCodeParser):
                 body=full_body,
             )
             # Recursively attach struct/interface children via dispatcher with prefilter.
-            if type_node is not None:
+            if type_node is not None and not is_type_ident:
                 allowed_struct = {
                     "field_declaration_list",
                     "field_declaration",
@@ -451,6 +489,7 @@ class GolangCodeParser(AbstractCodeParser):
                 allowed = (
                     allowed_struct if type_node.type == "struct_type" else allowed_iface
                 )
+
                 for ch in type_node.children:
                     if ch.type in allowed:
                         sym.children.extend(self._process_node(ch, sym))
@@ -458,14 +497,9 @@ class GolangCodeParser(AbstractCodeParser):
                         # skip punctuation/keywords, do not dispatch
                         continue
                     else:
-                        # defensive: warn on unexpected named nodes
-                        if getattr(ch, "is_named", False):
-                            logger.warning(
-                                "Unexpected Go type child node",
-                                parent_type=type_node.type,
-                                node_type=ch.type,
-                                line=ch.start_point[0] + 1,
-                            )
+                        self._debug_unknown_node(
+                            ch, context="type.children", parent_type=type_node.type
+                        )
             symbols.append(sym)
         return symbols
 
@@ -477,15 +511,25 @@ class GolangCodeParser(AbstractCodeParser):
     def _literal_node(self, node: ts.Node) -> ParsedNode:
         return self._make_node(node, kind=NodeKind.LITERAL, name=None, header=None)
 
-    def _debug_unknown_node(self, node: ts.Node) -> None:
+    def _debug_unknown_node(
+        self,
+        node: ts.Node,
+        *,
+        context: Optional[str] = None,
+        parent_type: Optional[str] = None,
+    ) -> None:
         path = self.parsed_file.path if self.parsed_file else self.rel_path
-        logger.debug(
-            "Unknown Go node type; emitting literal",
+        fields = dict(
             path=path,
             node_type=node.type,
             line=node.start_point[0] + 1,
             raw=(get_node_text(node) or "")[:200],
         )
+        if context is not None:
+            fields["context"] = context
+        if parent_type is not None:
+            fields["parent_type"] = parent_type
+        logger.debug("Unknown Go node type", **fields)
 
     # ---- member and container handlers via dispatcher ------------------
     def _handle_field_declaration(

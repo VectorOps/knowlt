@@ -139,6 +139,8 @@ class SearchSettings(BaseModel):
             NodeKind.FUNCTION: 2.0,
             NodeKind.METHOD: 2.0,
             NodeKind.CLASS: 1.5,
+            NodeKind.CONST: 1.3,
+            NodeKind.VARIABLE: 1.3,
             NodeKind.PROPERTY: 1.3,
             NodeKind.LITERAL: 0.9,
         },

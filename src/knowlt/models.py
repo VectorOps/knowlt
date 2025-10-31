@@ -23,6 +23,8 @@ class NodeKind(str, Enum):
     METHOD = "method"
     CLASS = "class"
     PROPERTY = "property"
+    CONST = "const"
+    VARIABLE = "variable"
     # Existing kinds
     LITERAL = "literal"
     BLOCK = "block"  # Block with child nodes

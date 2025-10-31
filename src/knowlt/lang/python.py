@@ -65,7 +65,12 @@ class PythonCodeParser(AbstractCodeParser):
             "try_statement": self._handle_try,
             "comment": self._handle_comment,
             "assignment": self._handle_assignment,
-            "expression_statement": self._handle_expression,
+            "pass_statement": self._node_kind_handler(NodeKind.LITERAL),
+            "raise_statement": self._node_kind_handler(NodeKind.LITERAL),
+            "expression_statement": self._node_kind_handler(NodeKind.LITERAL),
+            "for_statement": self._node_kind_handler(NodeKind.LITERAL),
+            "delete_statement": self._node_kind_handler(NodeKind.LITERAL),
+            "with_statement": self._node_kind_handler(NodeKind.LITERAL),
         }
 
     def _handle_file(self, root_node: ts.Node) -> None:
@@ -118,6 +123,20 @@ class PythonCodeParser(AbstractCodeParser):
             blk.children.extend(self._process_node(ch, parent=blk))
         parent.children.append(blk)
 
+    # --- simple handler helpers ---------------------------------------
+    def _node_kind_handler(
+        self, kind: NodeKind
+    ) -> Callable[[ts.Node, Optional[ParsedNode]], List[ParsedNode]]:
+        """
+        Factory for simple nodes (no name/header) with optional preceding comment.
+        Used for literals and similar constructs.
+        """
+        def _handler(node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+            n = self._make_node(node, kind=kind, name=None, header=None)
+            n.comment = self._get_preceding_comment(node)
+            return [n]
+        return _handler
+
     # Handlers
     def _handle_import(
         self, node: ts.Node, parent: Optional[ParsedNode]
@@ -138,6 +157,21 @@ class PythonCodeParser(AbstractCodeParser):
                 alias = get_node_text(alias_node) or None
             elif dotted is not None:
                 import_path = get_node_text(dotted) or None
+            allowed = {
+                "dotted_name",
+                "aliased_import",
+                "comment",
+                "import",
+                ",",
+                "(",
+                ")",
+                "as",
+            }
+            for ch in node.children:
+                if ch.type not in allowed:
+                    self._debug_unknown_node(
+                        ch, context="import.import_statement", parent_type=node.type
+                    )
         elif node.type == "import_from_statement":
             rel_node = next(
                 (c for c in node.children if c.type == "relative_import"), None
@@ -153,6 +187,26 @@ class PythonCodeParser(AbstractCodeParser):
             if aliased is not None:
                 alias_node = aliased.child_by_field_name("alias")
                 alias = get_node_text(alias_node) or None
+            allowed = {
+                "relative_import",
+                "dotted_name",
+                "aliased_import",
+                "wildcard_import",
+                "import_list",
+                "parenthesized_import_list",
+                "comment",
+                "from",
+                "import",
+                ",",
+                "(",
+                ")",
+                "as",
+            }
+            for ch in node.children:
+                if ch.type not in allowed:
+                    self._debug_unknown_node(
+                        ch, context="import.import_from_statement", parent_type=node.type
+                    )
         stripped = (import_path or "").lstrip(".")
         # Resolve once to avoid duplicate FS checks
         resolved_obj: Optional[Path] = self._locate_module_path(stripped) if stripped else None
@@ -314,7 +368,9 @@ class PythonCodeParser(AbstractCodeParser):
     def _handle_assignment(
         self, node: ts.Node, parent: Optional[ParsedNode]
     ) -> List[ParsedNode]:
-        return [self._literal_node(node)]
+        var = self._make_node(node, kind=NodeKind.VARIABLE, name=None, header=None)
+        var.comment = self._get_preceding_comment(node)
+        return [var]
 
     def _handle_expression(
         self, node: ts.Node, parent: Optional[ParsedNode]
@@ -337,8 +393,7 @@ class PythonCodeParser(AbstractCodeParser):
             return True
 
         if node.type == "decorated_definition":
-            # recurse into wrapped child/children
-            return any(self._is_async_function(c) for c in node.children)
+            return any(self._is_async_function_node(c) for c in node.children)
 
         return False
 
@@ -449,15 +504,25 @@ class PythonCodeParser(AbstractCodeParser):
     def _is_local_import(self, import_path: str) -> bool:
         return self._locate_module_path(import_path) is not None
 
-    def _debug_unknown_node(self, node: ts.Node) -> None:
+    def _debug_unknown_node(
+        self,
+        node: ts.Node,
+        *,
+        context: Optional[str] = None,
+        parent_type: Optional[str] = None,
+    ) -> None:
         path = self.parsed_file.path if self.parsed_file else self.rel_path
-        logger.debug(
-            "Unknown node type; emitting literal",
+        fields = dict(
             path=path,
             node_type=node.type,
             line=node.start_point[0] + 1,
             raw=(get_node_text(node) or "")[:200],
         )
+        if context is not None:
+            fields["context"] = context
+        if parent_type is not None:
+            fields["parent_type"] = parent_type
+        logger.debug("Unknown Python node type", **fields)
 
 
 class PythonLanguageHelper(AbstractLanguageHelper):
