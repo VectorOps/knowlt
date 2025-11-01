@@ -9,7 +9,6 @@ from knowlt.lang.golang import GolangCodeParser  # ensure registration
 
 
 SAMPLES_DIR = Path(__file__).parent / "samples"
-SUMMARY_DIR = Path(__file__).parent / "summary"
 
 
 @pytest.mark.asyncio
@@ -35,5 +34,5 @@ async def test_build_file_summary_matches_expected_main_go():
     assert file_summary.path == "main.go"
 
     # Load expected summary and compare
-    expected_text = (SUMMARY_DIR / "main.go").read_text(encoding="utf-8")
+    expected_text = (SAMPLES_DIR / "main.go.summary").read_text(encoding="utf-8")
     assert file_summary.content.strip() == expected_text.strip()

@@ -636,29 +636,43 @@ class TypeScriptCodeParser(AbstractCodeParser):
         return False
 
     def _handle_lexical(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
-        out: List[ParsedNode] = []
+        # Group multi-declarator statements under a single lexical node with the keyword header.
+        raw = (get_node_text(node) or "").lstrip()
+        if raw.startswith("const"):
+            keyword = "const"
+        elif raw.startswith("let"):
+            keyword = "let"
+        elif raw.startswith("var"):
+            keyword = "var"
+        else:
+            keyword = (raw.split(None, 1)[0] or "").strip() or "const"
+        group = self._make_node(node, kind=NodeKind.CUSTOM, name=None, header=keyword, subtype="lexical")
         for ch in node.named_children:
             if ch.type != "variable_declarator":
                 continue
             value_node = ch.child_by_field_name("value")
             if value_node is not None and value_node.type == "arrow_function":
-                out.append(self._handle_arrow_function_in_holder(ch, value_node, parent))
+                group.children.append(self._handle_arrow_function_in_holder(ch, value_node, parent))
                 continue
             if value_node is not None and value_node.type in ("class", "class_declaration", "abstract_class_declaration"):
                 # Handle anonymous class expressions by naming from declarator LHS
-                out.append(self._handle_class_expression(ch, value_node, parent))
+                group.children.append(self._handle_class_expression(ch, value_node, parent))
                 continue
             if value_node is not None and value_node.type == "call_expression":
                 alias = None
-                name_node = ch.child_by_field_name("name") or next((c for c in ch.named_children if c.type in ("identifier", "property_identifier")), None)
+                name_node = ch.child_by_field_name("name") or next(
+                    (c for c in ch.named_children if c.type in ("identifier", "property_identifier")), None
+                )
                 if name_node is not None:
                     alias = get_node_text(name_node) or None
                 self._collect_require_calls(value_node, alias=alias)
-            name_node = ch.child_by_field_name("name") or next((c for c in ch.named_children if c.type in ("identifier", "property_identifier")), None)
+            name_node = ch.child_by_field_name("name") or next(
+                (c for c in ch.named_children if c.type in ("identifier", "property_identifier")), None
+            )
             vname = get_node_text(name_node) or None
             kind = NodeKind.CONST if (get_node_text(node) or "").lstrip().startswith("const") else NodeKind.VARIABLE
-            out.append(self._make_node(ch, kind=kind, name=vname, header=None))
-        return out
+            group.children.append(self._make_node(ch, kind=kind, name=vname, header=None))
+        return [group]
 
     def _collect_require_calls(self, node: ts.Node, alias: Optional[str]) -> None:
         if node.type != "call_expression":
@@ -740,6 +754,23 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
                 head = f"{head} {{ ... }}"
             lines.append(f"{IND}{head}" if head else f"{IND}<function>")
             return "\n".join(lines)
+
+        # Single-line rendering for grouped lexical declarations
+        if sym.kind == NodeKind.CUSTOM and (sym.subtype or "").lower() == "lexical":
+            parts: List[str] = []
+            for ch in sym.children:
+                ch_sum = self.get_node_summary(
+                    ch,
+                    indent=0,
+                    include_comments=False,
+                    include_docs=include_docs,
+                )
+                if not ch_sum:
+                    continue
+                first = ch_sum.splitlines()[0].lstrip()
+                if first:
+                    parts.append(first)
+            return f"{IND}{(sym.header or '').strip()} " + ", ".join(parts)
 
         # Handle custom export node: prefix "export " to child summaries
         if sym.kind == NodeKind.CUSTOM and (sym.subtype or "").lower() == "export":
