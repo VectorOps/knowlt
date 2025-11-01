@@ -33,7 +33,8 @@ pypika = { git = "https://github.com/VectorOps/pypika.git", rev = "v0.49.4-dev" 
 [tool.mypy]
 plugins = ['pydantic.mypy']
 exclude = [
-    "^tests/parsers/python/samples/"
+    "^tests/lang/python/samples/",
+    "^tests/lang/python/summary/"
 ]
 exclude_gitignore = true
 
