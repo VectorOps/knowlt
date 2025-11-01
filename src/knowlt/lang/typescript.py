@@ -447,8 +447,8 @@ class TypeScriptCodeParser(AbstractCodeParser):
                 if ch.type in ("method_signature",):
                     mname_node = ch.child_by_field_name("name") or ch.child_by_field_name("property")
                     mname = get_node_text(mname_node) or None
-                    header = self._build_fn_like_header(ch, prefix="", name=mname)
-                    itf.children.append(self._make_node(ch, kind=NodeKind.METHOD, name=mname, header=header))
+                    raw = (get_node_text(ch) or "").strip()
+                    itf.children.append(self._make_node(ch, kind=NodeKind.METHOD, name=mname, header=raw, subtype="signature"))
                 elif ch.type in ("property_signature",):
                     pname_node = ch.child_by_field_name("name") or ch.child_by_field_name("property")
                     pname = get_node_text(pname_node) or None
@@ -505,8 +505,25 @@ class TypeScriptCodeParser(AbstractCodeParser):
     def _handle_method(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
         name_node = node.child_by_field_name("name")
         name = get_node_text(name_node) or None
-        header = self._build_fn_like_header(node, prefix="", name=name)
-        return [self._make_node(node, kind=NodeKind.METHOD, name=name, header=header)]
+        subtype: Optional[str] = None
+        # Preserve modifiers for methods with bodies by slicing header before the body
+        if node.type == "method_definition":
+            body_node = node.child_by_field_name("body") or node.child_by_field_name("statement")
+            if body_node is not None:
+                header = self.source_bytes[node.start_byte:body_node.start_byte].decode("utf8").strip()
+            else:
+                header = self._build_fn_like_header(node, prefix="", name=name)
+        elif node.type == "abstract_method_signature":
+            # Abstract method in an abstract class (signature only)
+            subtype = "abstract"
+            header = (get_node_text(node) or "").strip()
+        elif node.type == "method_signature":
+            # Interface method signature
+            subtype = "signature"
+            header = (get_node_text(node) or "").strip()
+        else:
+            header = self._build_fn_like_header(node, prefix="", name=name)
+        return [self._make_node(node, kind=NodeKind.METHOD, name=name, header=header, subtype=subtype)]
 
     def _handle_class_field(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
         name_node = node.child_by_field_name("name") or next((c for c in node.named_children if c.type in ("identifier","property_identifier")), None)
@@ -748,7 +765,19 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
             lines.append(f"{IND}}}")
             return "\n".join(lines)
 
-        if sym.kind in (NodeKind.FUNCTION, NodeKind.METHOD):
+        if sym.kind == NodeKind.METHOD:
+            head = header or ""
+            st = (sym.subtype or "").lower()
+            if st in ("abstract", "signature"):
+                # Render signatures (abstract/interface) as-is, no body placeholder
+                lines.append(f"{IND}{head}" if head else f"{IND}<method>")
+            else:
+                if head and not head.endswith("{"):
+                    head = f"{head} {{ ... }}"
+                lines.append(f"{IND}{head}" if head else f"{IND}<method>")
+            return "\n".join(lines)
+
+        if sym.kind == NodeKind.FUNCTION:
             head = header or ""
             if head and not head.endswith("{"):
                 head = f"{head} {{ ... }}"
