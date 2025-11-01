@@ -39,8 +39,8 @@ exclude_gitignore = true
 
 [dependency-groups]
 dev = [
+    "mypy>=1.18.2",
     "pytest>=8.4.0",
-    "mypy>=1.17.0",
     "pytest-asyncio>=1.2.0",
 ]
 

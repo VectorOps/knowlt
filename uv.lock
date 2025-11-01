@@ -290,7 +290,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "mypy", specifier = ">=1.17.0" },
+    { name = "mypy", specifier = ">=1.18.2" },
     { name = "pytest", specifier = ">=8.4.0" },
     { name = "pytest-asyncio", specifier = ">=1.2.0" },
 ]
