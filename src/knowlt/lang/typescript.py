@@ -265,32 +265,26 @@ class TypeScriptCodeParser(AbstractCodeParser):
             if ch.type in ("function_declaration", "function_expression"):
                 decls = self._handle_function(ch, parent=parent)
                 for d in decls:
-                    d.exported = True
                     exp.children.append(d)
             elif ch.type in ("arrow_function",):
                 decls = self._handle_arrow_function_top(ch, parent)
                 for d in decls:
-                    d.exported = True
                     exp.children.append(d)
             elif ch.type in ("class_declaration", "abstract_class_declaration"):
                 decls = self._handle_class(ch, parent=parent)
                 for d in decls:
-                    d.exported = True
                     exp.children.append(d)
             elif ch.type == "interface_declaration":
                 decls = self._handle_interface(ch, parent=parent)
                 for d in decls:
-                    d.exported = True
                     exp.children.append(d)
             elif ch.type == "enum_declaration":
                 decls = self._handle_enum(ch, parent=parent)
                 for d in decls:
-                    d.exported = True
                     exp.children.append(d)
             elif ch.type in ("variable_declaration", "lexical_declaration"):
                 decls = self._handle_lexical(ch, parent=parent)
                 for d in decls:
-                    d.exported = True
                     exp.children.append(d)
             elif ch.type in ("export_clause",):
                 # e.g., export { a, b }
@@ -474,19 +468,16 @@ class TypeScriptCodeParser(AbstractCodeParser):
                     exp = self._make_node(ch, kind=NodeKind.CUSTOM, name=None, header="export", subtype="export")
                     if rhs and rhs.type == "arrow_function":
                         fn = self._handle_arrow_function_in_holder(ch, rhs, parent)
-                        fn.exported = True
                         exp.children.append(fn)
                         return [exp]
                     if rhs and rhs.type in ("function_declaration", "function_expression"):
                         res = self._handle_function(rhs, parent)
                         for r in res:
-                            r.exported = True
                             exp.children.append(r)
                         return [exp]
                     if rhs and rhs.type in ("class", "class_declaration", "abstract_class_declaration"):
                         res = self._handle_class(rhs, parent)
                         for r in res:
-                            r.exported = True
                             exp.children.append(r)
                         return [exp]
                     return [exp]

@@ -52,7 +52,6 @@ CREATE TABLE IF NOT EXISTS nodes (
     subtype TEXT,
     docstring TEXT,
     comment TEXT,
-    exported BOOLEAN,
     start_line INTEGER,
     end_line INTEGER,
     start_byte INTEGER,

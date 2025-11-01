@@ -141,7 +141,6 @@ async def test_exported_enum_is_supported(tmp_path: Path):
     assert len(enums) == 1
     enum_sym = enums[0]
     assert enum_sym.name == "Foobar"
-    assert enum_sym.exported is True
 
     # the enum should include its members
     member_names = {c.name for c in enum_sym.children if c.name}
