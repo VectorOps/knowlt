@@ -186,3 +186,25 @@ export var x = 1, y = 2;
     # Non-export grouped const
     lexical_groups = [s for s in parsed.nodes if s.kind == NodeKind.CUSTOM and (s.subtype or "") == "lexical"]
     assert any(helper.get_node_summary(s).strip() == "const c = 3, d = () => { ... }" for s in lexical_groups)
+
+
+@pytest.mark.asyncio
+async def test_export_clause_summary_simple(tmp_path: Path):
+    """
+    Ensure `export {z}` produces a summary close to the source.
+    """
+    src = 'let z = "foobar";\nexport {z}\n'
+    (tmp_path / "export_clause.ts").write_text(src, encoding="utf-8")
+    project = await _make_dummy_project(tmp_path)
+    cache = ProjectCache()
+
+    parser = TypeScriptCodeParser(project, project.default_repo, "export_clause.ts")
+    parsed = parser.parse(cache)
+
+    from knowlt.lang.typescript import TypeScriptLanguageHelper
+    helper = TypeScriptLanguageHelper()
+
+    export_nodes = [s for s in parsed.nodes if s.kind == NodeKind.CUSTOM and (s.subtype or "") == "export"]
+    assert len(export_nodes) == 1
+    summary = helper.get_node_summary(export_nodes[0]).strip()
+    assert summary == "export {z}"
