@@ -242,13 +242,13 @@ class TypeScriptCodeParser(AbstractCodeParser):
         return [self._make_node(node, kind=NodeKind.LITERAL, name=None, header=None, subtype="import")]
 
     def _handle_export(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+        raw_stmt = get_node_text(node) or ""
         # Re-export: export ... from "module"
         source_node = node.child_by_field_name("source") or next((c for c in node.children if c.type in ("from_clause", "string")), None)
         if source_node and source_node.type == "from_clause":
             source_node = source_node.child_by_field_name("source")
         results: List[ParsedNode] = []
         if source_node and source_node.type == "string":
-            raw_stmt = get_node_text(node) or ""
             module = (get_node_text(source_node) or "").strip("\"'")
             physical, virtual, external = self._resolve_module(module)
             assert self.parsed_file is not None
@@ -266,6 +266,10 @@ class TypeScriptCodeParser(AbstractCodeParser):
             exp = self._make_node(node, kind=NodeKind.CUSTOM, name=None, header=raw_stmt.strip(), subtype="export")
             results.append(exp)
             return results
+        # Named export without source: `export { a, b as c }`
+        if any(c.type == "export_clause" for c in node.named_children):
+            exp = self._make_node(node, kind=NodeKind.CUSTOM, name=None, header=raw_stmt.strip(), subtype="export")
+            return [exp]
         # Local export: wrap declarations in a CUSTOM export node and mark inner nodes exported.
         exp = self._make_node(node, kind=NodeKind.CUSTOM, name=None, header="export", subtype="export")
         results.append(exp)
