@@ -36,7 +36,9 @@ class TypeScriptCodeParser(AbstractCodeParser):
     def __init__(self, pm: ProjectManager, repo: Repo, rel_path: str) -> None:
         super().__init__(pm, repo, rel_path)
         self.parser = _get_parser()
-        self._handlers: dict[str, Callable[[ts.Node, Optional[ParsedNode]], List[ParsedNode]]] = {
+        self._handlers: dict[
+            str, Callable[[ts.Node, Optional[ParsedNode]], List[ParsedNode]]
+        ] = {
             "import_statement": self._handle_import,
             "import_equals_declaration": self._handle_import_equals,
             "export_statement": self._handle_export,
@@ -80,7 +82,16 @@ class TypeScriptCodeParser(AbstractCodeParser):
         self, node: ts.Node, parent: Optional[ParsedNode] = None
     ) -> List[ParsedNode]:
         # Ignore punctuation and unnamed tokens to reduce noise and warnings
-        if (not getattr(node, "is_named", True)) or node.type in ("{", "}", "(", ")", "[", "]", ";", ","):
+        if (not getattr(node, "is_named", True)) or node.type in (
+            "{",
+            "}",
+            "(",
+            ")",
+            "[",
+            "]",
+            ";",
+            ",",
+        ):
             return []
         handler = self._handlers.get(node.type)
         if handler is not None:
@@ -105,10 +116,15 @@ class TypeScriptCodeParser(AbstractCodeParser):
     def _literal_handler(self, kind: NodeKind):
         def _h(node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
             return [self._make_node(node, kind=kind, name=None, header=None)]
+
         return _h
 
     def _debug_unknown_node(
-        self, node: ts.Node, *, context: Optional[str] = None, parent_type: Optional[str] = None
+        self,
+        node: ts.Node,
+        *,
+        context: Optional[str] = None,
+        parent_type: Optional[str] = None,
     ) -> None:
         path = self.parsed_file.path if self.parsed_file else self.rel_path
         fields = dict(
@@ -125,7 +141,12 @@ class TypeScriptCodeParser(AbstractCodeParser):
 
     def _extract_type_parameters(self, node: ts.Node) -> Optional[str]:
         tp_node = node.child_by_field_name("type_parameters") or next(
-            (c for c in node.children if c.type in ("type_parameters", "type_parameter_list")), None
+            (
+                c
+                for c in node.children
+                if c.type in ("type_parameters", "type_parameter_list")
+            ),
+            None,
         )
         if tp_node:
             return (get_node_text(tp_node) or "").strip() or None
@@ -133,10 +154,12 @@ class TypeScriptCodeParser(AbstractCodeParser):
         lt = hdr.find("<")
         gt = hdr.find(">", lt + 1)
         if 0 <= lt < gt:
-            return hdr[lt:gt + 1].strip()
+            return hdr[lt : gt + 1].strip()
         return None
 
-    def _build_fn_like_header(self, node: ts.Node, *, prefix: str, name: Optional[str]) -> str:
+    def _build_fn_like_header(
+        self, node: ts.Node, *, prefix: str, name: Optional[str]
+    ) -> str:
         params = get_node_text(node.child_by_field_name("parameters")) or "()"
         ret = ""
         rt = node.child_by_field_name("return_type") or node.child_by_field_name("type")
@@ -150,7 +173,9 @@ class TypeScriptCodeParser(AbstractCodeParser):
         if raw.startswith("async"):
             async_prefix = "async "
         nm = name or "<anonymous>"
-        return f"{async_prefix}{prefix}{' ' if prefix else ''}{nm}{tparams}{params}{ret}"
+        return (
+            f"{async_prefix}{prefix}{' ' if prefix else ''}{nm}{tparams}{params}{ret}"
+        )
 
     def _resolve_module(self, module: str) -> tuple[Optional[str], str, bool]:
         if module.startswith("."):
@@ -159,7 +184,9 @@ class TypeScriptCodeParser(AbstractCodeParser):
             if not rel_candidate.endswith(self._RESOLVE_SUFFIXES):
                 for suf in self._RESOLVE_SUFFIXES:
                     cand = f"{rel_candidate}{suf}"
-                    if self.repo.root_path and os.path.exists(os.path.join(self.repo.root_path, cand)):
+                    if self.repo.root_path and os.path.exists(
+                        os.path.join(self.repo.root_path, cand)
+                    ):
                         rel_candidate = cand
                         break
             return rel_candidate, module, False
@@ -187,9 +214,13 @@ class TypeScriptCodeParser(AbstractCodeParser):
         return None
 
     # --- handlers ---------------------------------------------------
-    def _handle_import(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_import(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         raw_stmt = get_node_text(node) or ""
-        src = node.child_by_field_name("source") or next((c for c in node.children if c.type == "string"), None)
+        src = node.child_by_field_name("source") or next(
+            (c for c in node.children if c.type == "string"), None
+        )
         module = (get_node_text(src) or "").strip("\"'")
         if not module:
             self._debug_unknown_node(node, context="import.missing_source")
@@ -215,14 +246,22 @@ class TypeScriptCodeParser(AbstractCodeParser):
                 raw=raw_stmt,
             )
         )
-        imp_node = self._make_node(node, kind=NodeKind.LITERAL, name=None, header=None, subtype="import")
+        imp_node = self._make_node(
+            node, kind=NodeKind.LITERAL, name=None, header=None, subtype="import"
+        )
         imp_node.comment = self._get_preceding_comment(node)
         return [imp_node]
 
-    def _handle_import_equals(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_import_equals(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         alias_node = node.child_by_field_name("name")
         req_node = node.child_by_field_name("module")
-        str_node = next((c for c in req_node.children if c.type == "string"), None) if req_node else None
+        str_node = (
+            next((c for c in req_node.children if c.type == "string"), None)
+            if req_node
+            else None
+        )
         alias = get_node_text(alias_node) or None
         module = (get_node_text(str_node) or "").strip("\"'")
         if not (alias and module):
@@ -239,12 +278,20 @@ class TypeScriptCodeParser(AbstractCodeParser):
                 raw=get_node_text(node) or "",
             )
         )
-        return [self._make_node(node, kind=NodeKind.LITERAL, name=None, header=None, subtype="import")]
+        return [
+            self._make_node(
+                node, kind=NodeKind.LITERAL, name=None, header=None, subtype="import"
+            )
+        ]
 
-    def _handle_export(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_export(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         raw_stmt = get_node_text(node) or ""
         # Re-export: export ... from "module"
-        source_node = node.child_by_field_name("source") or next((c for c in node.children if c.type in ("from_clause", "string")), None)
+        source_node = node.child_by_field_name("source") or next(
+            (c for c in node.children if c.type in ("from_clause", "string")), None
+        )
         if source_node and source_node.type == "from_clause":
             source_node = source_node.child_by_field_name("source")
         results: List[ParsedNode] = []
@@ -263,15 +310,29 @@ class TypeScriptCodeParser(AbstractCodeParser):
                 )
             )
             # Emit a CUSTOM export node to mirror old EXPORT behavior
-            exp = self._make_node(node, kind=NodeKind.CUSTOM, name=None, header=raw_stmt.strip(), subtype="export")
+            exp = self._make_node(
+                node,
+                kind=NodeKind.CUSTOM,
+                name=None,
+                header=raw_stmt.strip(),
+                subtype="export",
+            )
             results.append(exp)
             return results
         # Named export without source: `export { a, b as c }`
         if any(c.type == "export_clause" for c in node.named_children):
-            exp = self._make_node(node, kind=NodeKind.CUSTOM, name=None, header=raw_stmt.strip(), subtype="export")
+            exp = self._make_node(
+                node,
+                kind=NodeKind.CUSTOM,
+                name=None,
+                header=raw_stmt.strip(),
+                subtype="export",
+            )
             return [exp]
         # Local export: wrap declarations in a CUSTOM export node and mark inner nodes exported.
-        exp = self._make_node(node, kind=NodeKind.CUSTOM, name=None, header="export", subtype="export")
+        exp = self._make_node(
+            node, kind=NodeKind.CUSTOM, name=None, header="export", subtype="export"
+        )
         results.append(exp)
         for ch in node.named_children:
             if ch.type in ("function_declaration", "function_expression"):
@@ -313,7 +374,9 @@ class TypeScriptCodeParser(AbstractCodeParser):
             elif ch.type in ("identifier", "property_identifier"):
                 # e.g., export default ChatMessage
                 txt = (get_node_text(ch) or "").strip() or None
-                exp.children.append(self._make_node(ch, kind=NodeKind.LITERAL, name=txt, header=txt))
+                exp.children.append(
+                    self._make_node(ch, kind=NodeKind.LITERAL, name=txt, header=txt)
+                )
             elif ch.type in ("export_clause",):
                 # e.g., export { a, b }
                 pass
@@ -321,21 +384,33 @@ class TypeScriptCodeParser(AbstractCodeParser):
                 self._debug_unknown_node(ch, context="export.inner")
         return results
 
-    def _handle_function(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_function(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         name_node = node.child_by_field_name("name")
         if name_node is None:
             return []
         fn_name = get_node_text(name_node) or None
         header = self._build_fn_like_header(node, prefix="function", name=fn_name)
-        kind = NodeKind.METHOD if parent and parent.kind == NodeKind.CLASS else NodeKind.FUNCTION
+        kind = (
+            NodeKind.METHOD
+            if parent and parent.kind == NodeKind.CLASS
+            else NodeKind.FUNCTION
+        )
         sym = self._make_node(node, kind=kind, name=fn_name, header=header)
         return [sym]
 
-    def _handle_function_expression(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_function_expression(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         name_node = node.child_by_field_name("name")
         name = get_node_text(name_node) or None
         header = self._build_fn_like_header(node, prefix="function", name=name)
-        kind = NodeKind.METHOD if parent and parent.kind == NodeKind.CLASS else NodeKind.FUNCTION
+        kind = (
+            NodeKind.METHOD
+            if parent and parent.kind == NodeKind.CLASS
+            else NodeKind.FUNCTION
+        )
         return [self._make_node(node, kind=kind, name=name, header=header)]
 
     def _resolve_arrow_function_name(self, holder_node: ts.Node) -> Optional[str]:
@@ -344,7 +419,9 @@ class TypeScriptCodeParser(AbstractCodeParser):
             name = get_node_text(name_node) or ""
             if name:
                 return name.split(".")[-1]
-        lhs_node = holder_node.child_by_field_name("left") or holder_node.child_by_field_name("name")
+        lhs_node = holder_node.child_by_field_name(
+            "left"
+        ) or holder_node.child_by_field_name("name")
         if lhs_node:
             lhs = get_node_text(lhs_node) or ""
             if lhs:
@@ -359,19 +436,37 @@ class TypeScriptCodeParser(AbstractCodeParser):
             stack.extend(list(cur.children))
         return None
 
-    def _handle_arrow_function_top(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_arrow_function_top(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         header = self._build_fn_like_header(node, prefix="", name=None)
-        kind = NodeKind.METHOD if parent and parent.kind == NodeKind.CLASS else NodeKind.FUNCTION
+        kind = (
+            NodeKind.METHOD
+            if parent and parent.kind == NodeKind.CLASS
+            else NodeKind.FUNCTION
+        )
         return [self._make_node(node, kind=kind, name=None, header=header)]
 
-    def _handle_arrow_function_in_holder(self, holder_node: ts.Node, arrow_node: ts.Node, parent: Optional[ParsedNode]) -> ParsedNode:
+    def _handle_arrow_function_in_holder(
+        self, holder_node: ts.Node, arrow_node: ts.Node, parent: Optional[ParsedNode]
+    ) -> ParsedNode:
         name = self._resolve_arrow_function_name(holder_node)
         body_node = arrow_node.child_by_field_name("body")
         if body_node:
-            raw_header = self.source_bytes[holder_node.start_byte:body_node.start_byte].decode("utf8").rstrip()
+            raw_header = (
+                self.source_bytes[holder_node.start_byte : body_node.start_byte]
+                .decode("utf8")
+                .rstrip()
+            )
         else:
-            raw_header = (get_node_text(holder_node) or "").split("{", 1)[0].strip().rstrip(";")
-        kind = NodeKind.METHOD if parent and parent.kind == NodeKind.CLASS else NodeKind.FUNCTION
+            raw_header = (
+                (get_node_text(holder_node) or "").split("{", 1)[0].strip().rstrip(";")
+            )
+        kind = (
+            NodeKind.METHOD
+            if parent and parent.kind == NodeKind.CLASS
+            else NodeKind.FUNCTION
+        )
         return self._make_node(arrow_node, kind=kind, name=name, header=raw_header)
 
     def _resolve_class_expression_name(self, holder_node: ts.Node) -> Optional[str]:
@@ -381,7 +476,9 @@ class TypeScriptCodeParser(AbstractCodeParser):
             name = get_node_text(name_node) or ""
             if name:
                 return name.split(".")[-1]
-        lhs_node = holder_node.child_by_field_name("left") or holder_node.child_by_field_name("name")
+        lhs_node = holder_node.child_by_field_name(
+            "left"
+        ) or holder_node.child_by_field_name("name")
         if lhs_node:
             lhs = get_node_text(lhs_node) or ""
             if lhs:
@@ -396,41 +493,50 @@ class TypeScriptCodeParser(AbstractCodeParser):
             stack.extend(list(cur.children))
         return None
 
-    def _handle_class_expression(self, holder_node: ts.Node, class_node: ts.Node, parent: Optional[ParsedNode]) -> ParsedNode:
+    def _handle_class_expression(
+        self, holder_node: ts.Node, class_node: ts.Node, parent: Optional[ParsedNode]
+    ) -> ParsedNode:
         # Build a class symbol and name it from the holder (e.g., const Foo = class { ... })
         name = self._resolve_class_expression_name(holder_node)
-        # Prefer explicit header "class <Name><TParams>" for anonymous class expressions
-        tparams = self._extract_type_parameters(class_node) or ""
-        header = f"class {name}{tparams}" if name else "class"
+        # Prefer source-derived header when available; fall back to "class"
+        header = self._build_class_like_header(class_node, keyword="class")
         cls = self._make_node(class_node, kind=NodeKind.CLASS, name=name, header=header)
         body = next((c for c in class_node.children if c.type == "class_body"), None)
-        body_children = body.named_children if body is not None else class_node.named_children
+        body_children = (
+            body.named_children if body is not None else class_node.named_children
+        )
         for ch in body_children:
             cls.children.extend(self._process_node(ch, parent=cls))
         return cls
 
-    def _handle_function_expression_in_holder(self, holder_node: ts.Node, fn_node: ts.Node, parent: Optional[ParsedNode]) -> ParsedNode:
+    def _handle_function_expression_in_holder(
+        self, holder_node: ts.Node, fn_node: ts.Node, parent: Optional[ParsedNode]
+    ) -> ParsedNode:
         # Name function expressions by the LHS target (e.g., x = function(...) { ... })
         # Reuse arrow name resolver to extract identifier/property from holder.
         name = self._resolve_arrow_function_name(holder_node)
         header = self._build_fn_like_header(fn_node, prefix="function", name=name)
-        kind = NodeKind.METHOD if parent and parent.kind == NodeKind.CLASS else NodeKind.FUNCTION
+        kind = (
+            NodeKind.METHOD
+            if parent and parent.kind == NodeKind.CLASS
+            else NodeKind.FUNCTION
+        )
         return self._make_node(fn_node, kind=kind, name=name, header=header)
 
-    def _build_class_like_header(self, node: ts.Node, *, keyword: str, name: str) -> str:
-        code = (get_node_text(node) or "")
-        head = code.split("{", 1)[0].strip()
-        if head:
-            return head
-        tparams = self._extract_type_parameters(node) or ""
-        return f"{keyword} {name}{tparams}"
+    def _build_class_like_header(self, node: ts.Node, *, keyword: str) -> str:
+        code = get_node_text(node) or ""
+        head = code.split("{", 1)[0].strip().rstrip(";")
+        # Use source header when present; otherwise fall back to just the keyword.
+        return head or keyword
 
-    def _handle_class(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_class(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         name_node = node.child_by_field_name("name")
         if name_node is None:
             return []
         cls_name = get_node_text(name_node) or None
-        header = self._build_class_like_header(node, keyword="class", name=cls_name or "<anonymous>")
+        header = self._build_class_like_header(node, keyword="class")
         cls = self._make_node(node, kind=NodeKind.CLASS, name=cls_name, header=header)
         body = next((c for c in node.children if c.type == "class_body"), None)
         body_children = body.children if body is not None else node.children
@@ -438,44 +544,74 @@ class TypeScriptCodeParser(AbstractCodeParser):
             cls.children.extend(self._process_node(ch, parent=cls))
         return [cls]
 
-    def _handle_interface(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_interface(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         name_node = node.child_by_field_name("name")
         if name_node is None:
             return []
         itf_name = get_node_text(name_node) or None
-        header = self._build_class_like_header(node, keyword="interface", name=itf_name or "<anonymous>")
-        itf = self._make_node(node, kind=NodeKind.INTERFACE, name=itf_name, header=header)
+        header = self._build_class_like_header(node, keyword="interface")
+        itf = self._make_node(
+            node, kind=NodeKind.INTERFACE, name=itf_name, header=header
+        )
         body = next((c for c in node.children if c.type == "interface_body"), None)
         if body:
             for ch in body.named_children:
                 if ch.type in ("method_signature",):
-                    mname_node = ch.child_by_field_name("name") or ch.child_by_field_name("property")
+                    mname_node = ch.child_by_field_name(
+                        "name"
+                    ) or ch.child_by_field_name("property")
                     mname = get_node_text(mname_node) or None
                     raw = (get_node_text(ch) or "").strip()
-                    itf.children.append(self._make_node(ch, kind=NodeKind.METHOD, name=mname, header=raw, subtype="signature"))
+                    itf.children.append(
+                        self._make_node(
+                            ch,
+                            kind=NodeKind.METHOD,
+                            name=mname,
+                            header=raw,
+                            subtype="signature",
+                        )
+                    )
                 elif ch.type in ("property_signature",):
-                    pname_node = ch.child_by_field_name("name") or ch.child_by_field_name("property")
+                    pname_node = ch.child_by_field_name(
+                        "name"
+                    ) or ch.child_by_field_name("property")
                     pname = get_node_text(pname_node) or None
-                    itf.children.append(self._make_node(ch, kind=NodeKind.PROPERTY, name=pname, header=None))
+                    itf.children.append(
+                        self._make_node(
+                            ch, kind=NodeKind.PROPERTY, name=pname, header=None
+                        )
+                    )
                 else:
-                    itf.children.append(self._make_node(ch, kind=NodeKind.LITERAL, name=None, header=None))
+                    itf.children.append(
+                        self._make_node(
+                            ch, kind=NodeKind.LITERAL, name=None, header=None
+                        )
+                    )
         return [itf]
 
-    def _handle_type_alias(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_type_alias(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         name_node = node.child_by_field_name("name")
         if name_node is None:
             return []
         name = get_node_text(name_node) or None
         header = (get_node_text(node) or "").strip().rstrip(";")
-        alias = self._make_node(node, kind=NodeKind.LITERAL, name=name, header=header, subtype="type_alias")
+        alias = self._make_node(
+            node, kind=NodeKind.LITERAL, name=name, header=header, subtype="type_alias"
+        )
         return [alias]
 
-    def _handle_enum(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_enum(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         name_node = node.child_by_field_name("name")
         if name_node is None:
             return []
         en_name = get_node_text(name_node) or None
-        header = self._build_class_like_header(node, keyword="enum", name=en_name or "<anonymous>")
+        header = self._build_class_like_header(node, keyword="enum")
         en = self._make_node(node, kind=NodeKind.ENUM, name=en_name, header=header)
         body = next((c for c in node.children if c.type == "enum_body"), None)
         if body:
@@ -484,18 +620,33 @@ class TypeScriptCodeParser(AbstractCodeParser):
                     mname_node = member.child_by_field_name("name")
                     mname = get_node_text(mname_node) or None
                     if mname:
-                        en.children.append(self._make_node(member, kind=NodeKind.CONST, name=mname, header=None))
+                        en.children.append(
+                            self._make_node(
+                                member, kind=NodeKind.CONST, name=mname, header=None
+                            )
+                        )
                 elif member.type in ("property_identifier", "identifier"):
                     mname = get_node_text(member) or None
                     if mname:
-                        en.children.append(self._make_node(member, kind=NodeKind.CONST, name=mname, header=None))
+                        en.children.append(
+                            self._make_node(
+                                member, kind=NodeKind.CONST, name=mname, header=None
+                            )
+                        )
                 else:
                     self._debug_unknown_node(member, context="enum.member")
         return [en]
 
-    def _handle_namespace(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_namespace(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         name_node = node.child_by_field_name("name") or next(
-            (c for c in node.named_children if c.type in ("identifier", "property_identifier")), None
+            (
+                c
+                for c in node.named_children
+                if c.type in ("identifier", "property_identifier")
+            ),
+            None,
         )
         name = get_node_text(name_node) or None
         header = (get_node_text(node) or "").split("{", 1)[0].strip()
@@ -506,15 +657,23 @@ class TypeScriptCodeParser(AbstractCodeParser):
                 ns.children.extend(self._process_node(ch, parent=ns))
         return [ns]
 
-    def _handle_method(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_method(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         name_node = node.child_by_field_name("name")
         name = get_node_text(name_node) or None
         subtype: Optional[str] = None
         # Preserve modifiers for methods with bodies by slicing header before the body
         if node.type == "method_definition":
-            body_node = node.child_by_field_name("body") or node.child_by_field_name("statement")
+            body_node = node.child_by_field_name("body") or node.child_by_field_name(
+                "statement"
+            )
             if body_node is not None:
-                header = self.source_bytes[node.start_byte:body_node.start_byte].decode("utf8").strip()
+                header = (
+                    self.source_bytes[node.start_byte : body_node.start_byte]
+                    .decode("utf8")
+                    .strip()
+                )
             else:
                 header = self._build_fn_like_header(node, prefix="", name=name)
         elif node.type == "abstract_method_signature":
@@ -527,76 +686,125 @@ class TypeScriptCodeParser(AbstractCodeParser):
             header = (get_node_text(node) or "").strip()
         else:
             header = self._build_fn_like_header(node, prefix="", name=name)
-        return [self._make_node(node, kind=NodeKind.METHOD, name=name, header=header, subtype=subtype)]
+        return [
+            self._make_node(
+                node, kind=NodeKind.METHOD, name=name, header=header, subtype=subtype
+            )
+        ]
 
-    def _handle_class_field(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
-        name_node = node.child_by_field_name("name") or next((c for c in node.named_children if c.type in ("identifier","property_identifier")), None)
+    def _handle_class_field(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
+        name_node = node.child_by_field_name("name") or next(
+            (
+                c
+                for c in node.named_children
+                if c.type in ("identifier", "property_identifier")
+            ),
+            None,
+        )
         pname = get_node_text(name_node) or None
         value_node = node.child_by_field_name("value")
         out: List[ParsedNode] = []
         if value_node and value_node.type == "arrow_function":
-            out.append(self._handle_arrow_function_in_holder(node, value_node, parent or None))
-        elif value_node and value_node.type in ("class", "class_declaration", "abstract_class_declaration"):
+            out.append(
+                self._handle_arrow_function_in_holder(node, value_node, parent or None)
+            )
+        elif value_node and value_node.type in (
+            "class",
+            "class_declaration",
+            "abstract_class_declaration",
+        ):
             out.extend(self._handle_class(value_node, parent))
         else:
-            out.append(self._make_node(node, kind=NodeKind.PROPERTY, name=pname, header=None))
+            out.append(
+                self._make_node(node, kind=NodeKind.PROPERTY, name=pname, header=None)
+            )
         return out
 
-    def _handle_comment(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_comment(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         return [self._make_node(node, kind=NodeKind.COMMENT, name=None, header=None)]
 
-    def _handle_call_expression(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_call_expression(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         # Collect require() usage and otherwise treat as literal expression
         self._collect_require_calls(node, alias=None)
         expr = self._make_node(node, kind=NodeKind.LITERAL, name=None, header=None)
         expr.comment = self._get_preceding_comment(node)
         return [expr]
 
-    def _handle_for_in(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_for_in(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         # Handles both `for (... in ...)` and `for (... of ...)` in tree-sitter typescript
         header = (get_node_text(node) or "").split("{", 1)[0].strip()
         loop = self._make_node(node, kind=NodeKind.LITERAL, name=None, header=header)
-        body = node.child_by_field_name("body") or node.child_by_field_name("statement") \
+        body = (
+            node.child_by_field_name("body")
+            or node.child_by_field_name("statement")
             or next((c for c in node.children if c.type in ("statement_block",)), None)
+        )
         if body:
             for ch in body.named_children:
                 loop.children.extend(self._process_node(ch, parent=loop))
         return [loop]
 
-    def _handle_if(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_if(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         # Represent the if as a literal header and traverse branches
         header = (get_node_text(node) or "").split("{", 1)[0].strip()
         ifn = self._make_node(node, kind=NodeKind.LITERAL, name=None, header=header)
-        cons = node.child_by_field_name("consequence") or node.child_by_field_name("body")
+        cons = node.child_by_field_name("consequence") or node.child_by_field_name(
+            "body"
+        )
         alt = node.child_by_field_name("alternative")
         if cons:
-            for ch in (cons.named_children or []):
+            for ch in cons.named_children or []:
                 ifn.children.extend(self._process_node(ch, parent=ifn))
         if alt:
-            for ch in (alt.named_children or []):
+            for ch in alt.named_children or []:
                 ifn.children.extend(self._process_node(ch, parent=ifn))
         return [ifn]
 
-    def _handle_satisfies_expression(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_satisfies_expression(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         # Unwrap and process inner value; useful in `export default { ... } satisfies Config`
         left = node.child_by_field_name("left") or node.child_by_field_name("value")
         if left is not None:
             return self._process_node(left, parent)
         return [self._literal_node(node)]
 
-    def _handle_ambient_declaration(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_ambient_declaration(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         # Handle `declare ...` blocks (e.g., `declare global { ... }`)
-        name_node = next((c for c in node.named_children if c.type in ("identifier", "property_identifier")), None)
+        name_node = next(
+            (
+                c
+                for c in node.named_children
+                if c.type in ("identifier", "property_identifier")
+            ),
+            None,
+        )
         name = get_node_text(name_node) or None
         header = (get_node_text(node) or "").split("{", 1)[0].strip()
-        amb = self._make_node(node, kind=NodeKind.CUSTOM, name=name, header=header, subtype="ambient")
+        amb = self._make_node(
+            node, kind=NodeKind.CUSTOM, name=name, header=header, subtype="ambient"
+        )
         block = next((c for c in node.children if c.type == "statement_block"), None)
         if block:
             for ch in block.named_children:
                 amb.children.extend(self._process_node(ch, parent=amb))
         return [amb]
 
-    def _handle_expression(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_expression(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         for ch in node.named_children:
             if ch.type == "assignment_expression":
                 lhs = ch.child_by_field_name("left")
@@ -604,17 +812,30 @@ class TypeScriptCodeParser(AbstractCodeParser):
                 # CommonJS exports
                 if lhs and self._is_commonjs_export(lhs):
                     # Wrap the exported right-hand symbol(s) in a CUSTOM export node
-                    exp = self._make_node(ch, kind=NodeKind.CUSTOM, name=None, header="export", subtype="export")
+                    exp = self._make_node(
+                        ch,
+                        kind=NodeKind.CUSTOM,
+                        name=None,
+                        header="export",
+                        subtype="export",
+                    )
                     if rhs and rhs.type == "arrow_function":
                         fn = self._handle_arrow_function_in_holder(ch, rhs, parent)
                         exp.children.append(fn)
                         return [exp]
-                    if rhs and rhs.type in ("function_declaration", "function_expression"):
+                    if rhs and rhs.type in (
+                        "function_declaration",
+                        "function_expression",
+                    ):
                         # Name function from assignment LHS
                         fn = self._handle_function_expression_in_holder(ch, rhs, parent)
                         exp.children.append(fn)
                         return [exp]
-                    if rhs and rhs.type in ("class", "class_declaration", "abstract_class_declaration"):
+                    if rhs and rhs.type in (
+                        "class",
+                        "class_declaration",
+                        "abstract_class_declaration",
+                    ):
                         # Name class from assignment LHS
                         cls = self._handle_class_expression(ch, rhs, parent)
                         exp.children.append(cls)
@@ -622,17 +843,25 @@ class TypeScriptCodeParser(AbstractCodeParser):
                     return [exp]
                 # require() aliasing
                 if rhs and rhs.type == "call_expression":
-                    self._collect_require_calls(rhs, alias=(get_node_text(lhs) or "").split(".")[-1] or None)
+                    self._collect_require_calls(
+                        rhs, alias=(get_node_text(lhs) or "").split(".")[-1] or None
+                    )
                 # Holder-aware assignment handling outside export:
                 if rhs and rhs.type == "arrow_function":
                     return [self._handle_arrow_function_in_holder(ch, rhs, parent)]
                 if rhs and rhs.type in ("function_declaration", "function_expression"):
                     return [self._handle_function_expression_in_holder(ch, rhs, parent)]
-                if rhs and rhs.type in ("class", "class_declaration", "abstract_class_declaration"):
+                if rhs and rhs.type in (
+                    "class",
+                    "class_declaration",
+                    "abstract_class_declaration",
+                ):
                     return [self._handle_class_expression(ch, rhs, parent)]
                 # Plain assignment: set variable name from LHS
                 vname = self._resolve_arrow_function_name(ch)
-                var = self._make_node(ch, kind=NodeKind.VARIABLE, name=vname, header=None)
+                var = self._make_node(
+                    ch, kind=NodeKind.VARIABLE, name=vname, header=None
+                )
                 var.comment = self._get_preceding_comment(ch)
                 return [var]
             elif ch.type == "call_expression":
@@ -656,7 +885,9 @@ class TypeScriptCodeParser(AbstractCodeParser):
             node = obj
         return False
 
-    def _handle_lexical(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+    def _handle_lexical(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
         # Group multi-declarator statements under a single lexical node with the keyword header.
         raw = (get_node_text(node) or "").lstrip()
         if raw.startswith("const"):
@@ -667,32 +898,59 @@ class TypeScriptCodeParser(AbstractCodeParser):
             keyword = "var"
         else:
             keyword = (raw.split(None, 1)[0] or "").strip() or "const"
-        group = self._make_node(node, kind=NodeKind.CUSTOM, name=None, header=keyword, subtype="lexical")
+        group = self._make_node(
+            node, kind=NodeKind.CUSTOM, name=None, header=keyword, subtype="lexical"
+        )
         for ch in node.named_children:
             if ch.type != "variable_declarator":
                 continue
             value_node = ch.child_by_field_name("value")
             if value_node is not None and value_node.type == "arrow_function":
-                group.children.append(self._handle_arrow_function_in_holder(ch, value_node, parent))
+                group.children.append(
+                    self._handle_arrow_function_in_holder(ch, value_node, parent)
+                )
                 continue
-            if value_node is not None and value_node.type in ("class", "class_declaration", "abstract_class_declaration"):
+            if value_node is not None and value_node.type in (
+                "class",
+                "class_declaration",
+                "abstract_class_declaration",
+            ):
                 # Handle anonymous class expressions by naming from declarator LHS
-                group.children.append(self._handle_class_expression(ch, value_node, parent))
+                group.children.append(
+                    self._handle_class_expression(ch, value_node, parent)
+                )
                 continue
             if value_node is not None and value_node.type == "call_expression":
                 alias = None
                 name_node = ch.child_by_field_name("name") or next(
-                    (c for c in ch.named_children if c.type in ("identifier", "property_identifier")), None
+                    (
+                        c
+                        for c in ch.named_children
+                        if c.type in ("identifier", "property_identifier")
+                    ),
+                    None,
                 )
                 if name_node is not None:
                     alias = get_node_text(name_node) or None
                 self._collect_require_calls(value_node, alias=alias)
             name_node = ch.child_by_field_name("name") or next(
-                (c for c in ch.named_children if c.type in ("identifier", "property_identifier")), None
+                (
+                    c
+                    for c in ch.named_children
+                    if c.type in ("identifier", "property_identifier")
+                ),
+                None,
             )
             vname = get_node_text(name_node) or None
-            kind = NodeKind.CONST if (get_node_text(node) or "").lstrip().startswith("const") else NodeKind.VARIABLE
-            group.children.append(self._make_node(ch, kind=kind, name=vname, header=None))
+            kind = (
+                NodeKind.CONST
+                if (get_node_text(node) or "").lstrip().startswith("const")
+                else NodeKind.VARIABLE
+            )
+            group.children.append(
+                self._make_node(ch, kind=kind, name=vname, header=None)
+            )
+        print(group)
         return [group]
 
     def _collect_require_calls(self, node: ts.Node, alias: Optional[str]) -> None:
@@ -747,7 +1005,12 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
             lines.append(f"{IND}{header}" if header else f"{IND}class {{")
             if sym.children:
                 for ch in sym.children:
-                    ch_sum = self.get_node_summary(ch, indent=indent + 2, include_comments=include_comments, include_docs=include_docs)
+                    ch_sum = self.get_node_summary(
+                        ch,
+                        indent=indent + 2,
+                        include_comments=include_comments,
+                        include_docs=include_docs,
+                    )
                     if ch_sum:
                         lines.append(ch_sum)
             else:
@@ -761,7 +1024,12 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
             lines.append(f"{IND}{header}" if header else f"{IND}<decl> {{")
             if sym.children:
                 for ch in sym.children:
-                    ch_sum = self.get_node_summary(ch, indent=indent + 2, include_comments=include_comments, include_docs=include_docs)
+                    ch_sum = self.get_node_summary(
+                        ch,
+                        indent=indent + 2,
+                        include_comments=include_comments,
+                        include_docs=include_docs,
+                    )
                     if ch_sum:
                         lines.append(ch_sum)
             else:
@@ -828,9 +1096,16 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
             return f"{IND}{bare}"
 
         if sym.children:
-            lines.append(f"{IND}{header}" if header else f"{IND}{(sym.body or '').strip()}")
+            lines.append(
+                f"{IND}{header}" if header else f"{IND}{(sym.body or '').strip()}"
+            )
             for ch in sym.children:
-                ch_sum = self.get_node_summary(ch, indent=indent + 2, include_comments=include_comments, include_docs=include_docs)
+                ch_sum = self.get_node_summary(
+                    ch,
+                    indent=indent + 2,
+                    include_comments=include_comments,
+                    include_docs=include_docs,
+                )
                 if ch_sum:
                     lines.append(ch_sum)
             return "\n".join(lines)
@@ -842,10 +1117,53 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
 
     def get_common_syntax_words(self) -> set[str]:
         return {
-            "abstract","as","asserts","break","case","catch","class","const","continue",
-            "declare","default","do","else","export","extends","false","finally","for",
-            "function","if","import","in","instanceof","interface","let","module",
-            "namespace","new","null","override","private","protected","public","readonly",
-            "return","static","super","switch","this","throw","true","try","typeof",
-            "undefined","var","void","while","with","async",
+            "abstract",
+            "as",
+            "asserts",
+            "break",
+            "case",
+            "catch",
+            "class",
+            "const",
+            "continue",
+            "declare",
+            "default",
+            "do",
+            "else",
+            "export",
+            "extends",
+            "false",
+            "finally",
+            "for",
+            "function",
+            "if",
+            "import",
+            "in",
+            "instanceof",
+            "interface",
+            "let",
+            "module",
+            "namespace",
+            "new",
+            "null",
+            "override",
+            "private",
+            "protected",
+            "public",
+            "readonly",
+            "return",
+            "static",
+            "super",
+            "switch",
+            "this",
+            "throw",
+            "true",
+            "try",
+            "typeof",
+            "undefined",
+            "var",
+            "void",
+            "while",
+            "with",
+            "async",
         }
