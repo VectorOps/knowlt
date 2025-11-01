@@ -13,7 +13,6 @@ from knowlt.data_helpers import resolve_node_hierarchy
 
 
 SAMPLES_DIR = Path(__file__).parent / "samples"
-SUMMARY_DIR = Path(__file__).parent / "summary"
 
 
 @pytest.mark.asyncio
@@ -39,7 +38,7 @@ async def test_build_file_summary_matches_expected_simple_py():
     assert file_summary.path == "simple.py"
 
     # Load expected summary and compare
-    expected_text = (SUMMARY_DIR / "simple.py").read_text(encoding="utf-8")
+    expected_text = (SAMPLES_DIR / "simple.py.sample").read_text(encoding="utf-8")
     assert file_summary.content.strip() == expected_text.strip()
 
 
@@ -66,10 +65,16 @@ async def test_get_node_summary_include_parents_for_async_method():
     resolve_node_hierarchy(nodes)
 
     # Locate class `Test` and its `async_method`
-    cls = next((n for n in nodes if n.kind == NodeKind.CLASS and n.name == "Test"), None)
+    cls = next(
+        (n for n in nodes if n.kind == NodeKind.CLASS and n.name == "Test"), None
+    )
     assert cls is not None, "Class 'Test' not found"
     async_method = next(
-        (c for c in cls.children if c.kind == NodeKind.METHOD and c.name == "async_method"),
+        (
+            c
+            for c in cls.children
+            if c.kind == NodeKind.METHOD and c.name == "async_method"
+        ),
         None,
     )
     assert async_method is not None, "Method 'async_method' not found under 'Test'"

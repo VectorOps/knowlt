@@ -3,3 +3,13 @@
 ** [ ] Rethink comments vs docstrings logic. Maybe combine include_comments and include_docs.
 For languages that don't have explicit docstrings (like Go) current implementation makes it
 hard to generate file summaries with comments as individual nodes and as a comment field.
+** [ ] TypeScript
+*** [ ] Add type parsing
+*** [ ] Fix enum summary generation - need trailing commas
+*** [ ] Fix `abstract getName(): string` summary generation - missing abstract, etc.
+*** [ ] Fix `export {z}`
+*** [ ] Add support for namespace parsing
+*** [ ] Fix `const Foo = class {` summary generation - returns as `const class Foo {` and no children
+*** [ ] Add support for export default `export default function MyApp() { ... }`
+*** [ ] Fix commonJs export: `exports.area = (r) => PI * r ** 2` produces `export exports.area = (r) => { ... }`
+*** [X] Fix include_parents for summary generator

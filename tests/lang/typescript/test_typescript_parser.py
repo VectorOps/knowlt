@@ -151,3 +151,38 @@ async def test_exported_enum_is_supported(tmp_path: Path):
     # the enum should include its members
     member_names = {c.name for c in enum_sym.children if c.name}
     assert {"a", "b"}.issubset(member_names)
+
+
+@pytest.mark.asyncio
+async def test_lexical_group_single_line_summary(tmp_path: Path):
+    """
+    Ensure grouped lexical declarations (const/let/var) render as a single line,
+    and preserve the keyword with comma-separated declarators, including inside export.
+    """
+    src = """
+export const j1 = 10, f1 = () => {};
+export let a = 1, b = 2;
+const c = 3, d = () => {};
+export var x = 1, y = 2;
+"""
+    (tmp_path / "lexical.ts").write_text(src, encoding="utf-8")
+    project = await _make_dummy_project(tmp_path)
+    cache = ProjectCache()
+
+    parser = TypeScriptCodeParser(project, project.default_repo, "lexical.ts")
+    parsed = parser.parse(cache)
+
+    # Build summaries
+    from knowlt.lang.typescript import TypeScriptLanguageHelper
+    helper = TypeScriptLanguageHelper()
+
+    # Exported groups
+    export_nodes = [s for s in parsed.nodes if s.kind == NodeKind.CUSTOM and (s.subtype or "") == "export"]
+    export_lines = {helper.get_node_summary(s).strip() for s in export_nodes}
+    assert "export const j1 = 10, f1 = () => { ... }" in export_lines
+    assert "export let a = 1, b = 2" in export_lines
+    assert "export var x = 1, y = 2" in export_lines
+
+    # Non-export grouped const
+    lexical_groups = [s for s in parsed.nodes if s.kind == NodeKind.CUSTOM and (s.subtype or "") == "lexical"]
+    assert any(helper.get_node_summary(s).strip() == "const c = 3, d = () => { ... }" for s in lexical_groups)
