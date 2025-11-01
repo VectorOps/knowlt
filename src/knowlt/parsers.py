@@ -73,7 +73,6 @@ class ParsedNode(BaseModel):
     visibility: Optional[Visibility] = None
     docstring: Optional[str] = None
     comment: Optional[str] = None
-    exported: Optional[bool] = None
 
     children: List["ParsedNode"] = Field(default_factory=list)
 
@@ -91,7 +90,6 @@ class ParsedNode(BaseModel):
             "visibility": self.visibility,
             "docstring": self.docstring,
             "comment": self.comment,
-            "exported": self.exported,
         }
 
 
