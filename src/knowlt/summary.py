@@ -81,7 +81,7 @@ async def build_file_summary(
     resolve_node_hierarchy(symbols)
 
     # Top-level nodes are those without a recorded parent
-    top_level = [s for s in symbols if not getattr(s, "parent_node_id", None)]
+    top_level = [s for s in symbols if not s.parent_node_id]
     # Preserve source order
     top_level.sort(
         key=lambda s: (getattr(s, "start_line", 0), getattr(s, "start_byte", 0))
@@ -100,5 +100,7 @@ async def build_file_summary(
     ]
 
     return FileSummary(
-        path=rel_path, content="\n".join(sections), summary_mode=summary_mode
+        path=rel_path,
+        content="\n".join(s for s in sections if s),
+        summary_mode=summary_mode,
     )
