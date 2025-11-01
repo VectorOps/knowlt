@@ -43,6 +43,11 @@ class TypeScriptCodeParser(AbstractCodeParser):
             "function_declaration": self._handle_function,
             "function_expression": self._handle_function_expression,
             "arrow_function": self._handle_arrow_function_top,
+            "call_expression": self._handle_call_expression,
+            "for_in_statement": self._handle_for_in,
+            "if_statement": self._handle_if,
+            "satisfies_expression": self._handle_satisfies_expression,
+            "ambient_declaration": self._handle_ambient_declaration,
             "class_declaration": self._handle_class,
             "abstract_class_declaration": self._handle_class,
             "interface_declaration": self._handle_interface,
@@ -74,6 +79,9 @@ class TypeScriptCodeParser(AbstractCodeParser):
     def _process_node(
         self, node: ts.Node, parent: Optional[ParsedNode] = None
     ) -> List[ParsedNode]:
+        # Ignore punctuation and unnamed tokens to reduce noise and warnings
+        if (not getattr(node, "is_named", True)) or node.type in ("{", "}", "(", ")", "[", "]", ";", ","):
+            return []
         handler = self._handlers.get(node.type)
         if handler is not None:
             try:
@@ -270,6 +278,18 @@ class TypeScriptCodeParser(AbstractCodeParser):
                 decls = self._handle_arrow_function_top(ch, parent)
                 for d in decls:
                     exp.children.append(d)
+            elif ch.type == "satisfies_expression":
+                # e.g., export default { ... } satisfies Config
+                for d in self._handle_satisfies_expression(ch, parent):
+                    exp.children.append(d)
+            elif ch.type == "type_alias_declaration":
+                decls = self._handle_type_alias(ch, parent=parent)
+                for d in decls:
+                    exp.children.append(d)
+            elif ch.type == "call_expression":
+                # Support patterns like: export default defineConfig(...)
+                for d in self._handle_call_expression(ch, parent):
+                    exp.children.append(d)
             elif ch.type in ("class_declaration", "abstract_class_declaration"):
                 decls = self._handle_class(ch, parent=parent)
                 for d in decls:
@@ -286,6 +306,10 @@ class TypeScriptCodeParser(AbstractCodeParser):
                 decls = self._handle_lexical(ch, parent=parent)
                 for d in decls:
                     exp.children.append(d)
+            elif ch.type in ("identifier", "property_identifier"):
+                # e.g., export default ChatMessage
+                txt = (get_node_text(ch) or "").strip() or None
+                exp.children.append(self._make_node(ch, kind=NodeKind.LITERAL, name=txt, header=txt))
             elif ch.type in ("export_clause",):
                 # e.g., export { a, b }
                 pass
@@ -500,6 +524,57 @@ class TypeScriptCodeParser(AbstractCodeParser):
     def _handle_comment(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
         return [self._make_node(node, kind=NodeKind.COMMENT, name=None, header=None)]
 
+    def _handle_call_expression(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+        # Collect require() usage and otherwise treat as literal expression
+        self._collect_require_calls(node, alias=None)
+        expr = self._make_node(node, kind=NodeKind.LITERAL, name=None, header=None)
+        expr.comment = self._get_preceding_comment(node)
+        return [expr]
+
+    def _handle_for_in(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+        # Handles both `for (... in ...)` and `for (... of ...)` in tree-sitter typescript
+        header = (get_node_text(node) or "").split("{", 1)[0].strip()
+        loop = self._make_node(node, kind=NodeKind.LITERAL, name=None, header=header)
+        body = node.child_by_field_name("body") or node.child_by_field_name("statement") \
+            or next((c for c in node.children if c.type in ("statement_block",)), None)
+        if body:
+            for ch in body.named_children:
+                loop.children.extend(self._process_node(ch, parent=loop))
+        return [loop]
+
+    def _handle_if(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+        # Represent the if as a literal header and traverse branches
+        header = (get_node_text(node) or "").split("{", 1)[0].strip()
+        ifn = self._make_node(node, kind=NodeKind.LITERAL, name=None, header=header)
+        cons = node.child_by_field_name("consequence") or node.child_by_field_name("body")
+        alt = node.child_by_field_name("alternative")
+        if cons:
+            for ch in (cons.named_children or []):
+                ifn.children.extend(self._process_node(ch, parent=ifn))
+        if alt:
+            for ch in (alt.named_children or []):
+                ifn.children.extend(self._process_node(ch, parent=ifn))
+        return [ifn]
+
+    def _handle_satisfies_expression(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+        # Unwrap and process inner value; useful in `export default { ... } satisfies Config`
+        left = node.child_by_field_name("left") or node.child_by_field_name("value")
+        if left is not None:
+            return self._process_node(left, parent)
+        return [self._literal_node(node)]
+
+    def _handle_ambient_declaration(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
+        # Handle `declare ...` blocks (e.g., `declare global { ... }`)
+        name_node = next((c for c in node.named_children if c.type in ("identifier", "property_identifier")), None)
+        name = get_node_text(name_node) or None
+        header = (get_node_text(node) or "").split("{", 1)[0].strip()
+        amb = self._make_node(node, kind=NodeKind.CUSTOM, name=name, header=header, subtype="ambient")
+        block = next((c for c in node.children if c.type == "statement_block"), None)
+        if block:
+            for ch in block.named_children:
+                amb.children.extend(self._process_node(ch, parent=amb))
+        return [amb]
+
     def _handle_expression(self, node: ts.Node, parent: Optional[ParsedNode]) -> List[ParsedNode]:
         for ch in node.named_children:
             if ch.type == "assignment_expression":
@@ -540,7 +615,8 @@ class TypeScriptCodeParser(AbstractCodeParser):
                 var.comment = self._get_preceding_comment(ch)
                 return [var]
             elif ch.type == "call_expression":
-                self._collect_require_calls(ch, alias=None)
+                # Direct call inside an expression statement; handle uniformly
+                return self._handle_call_expression(ch, parent)
         expr = self._make_node(node, kind=NodeKind.LITERAL, name=None, header=None)
         expr.comment = self._get_preceding_comment(node)
         return [expr]
