@@ -116,6 +116,12 @@ async def test_typescript_parser_on_simple_file():
     test_cls_children = _to_map(flat_map["Test"].children)
     assert "method" in test_cls_children
     assert test_cls_children["method"].kind == NodeKind.METHOD
+    # class from class-expression assigned to const should be named
+    assert "Foo" in top_level
+    assert top_level["Foo"].kind == NodeKind.CLASS
+    foo_children = _to_map(top_level["Foo"].children)
+    assert "bar" in foo_children
+    assert foo_children["bar"].kind == NodeKind.METHOD
 
 
 @pytest.mark.asyncio

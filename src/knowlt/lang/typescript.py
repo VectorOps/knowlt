@@ -346,6 +346,49 @@ class TypeScriptCodeParser(AbstractCodeParser):
         kind = NodeKind.METHOD if parent and parent.kind == NodeKind.CLASS else NodeKind.FUNCTION
         return self._make_node(arrow_node, kind=kind, name=name, header=raw_header)
 
+    def _resolve_class_expression_name(self, holder_node: ts.Node) -> Optional[str]:
+        # Mirror arrow name resolution: prefer declarator/assignment LHS identifiers/properties
+        name_node = holder_node.child_by_field_name("name")
+        if name_node:
+            name = get_node_text(name_node) or ""
+            if name:
+                return name.split(".")[-1]
+        lhs_node = holder_node.child_by_field_name("left") or holder_node.child_by_field_name("name")
+        if lhs_node:
+            lhs = get_node_text(lhs_node) or ""
+            if lhs:
+                return lhs.split(".")[-1]
+        stack = [holder_node]
+        while stack:
+            cur = stack.pop()
+            if cur.type in ("identifier", "property_identifier"):
+                val = get_node_text(cur) or ""
+                if val:
+                    return val.split(".")[-1]
+            stack.extend(list(cur.children))
+        return None
+
+    def _handle_class_expression(self, holder_node: ts.Node, class_node: ts.Node, parent: Optional[ParsedNode]) -> ParsedNode:
+        # Build a class symbol and name it from the holder (e.g., const Foo = class { ... })
+        name = self._resolve_class_expression_name(holder_node)
+        # Prefer explicit header "class <Name><TParams>" for anonymous class expressions
+        tparams = self._extract_type_parameters(class_node) or ""
+        header = f"class {name}{tparams}" if name else "class"
+        cls = self._make_node(class_node, kind=NodeKind.CLASS, name=name, header=header)
+        body = next((c for c in class_node.children if c.type == "class_body"), None)
+        body_children = body.named_children if body is not None else class_node.named_children
+        for ch in body_children:
+            cls.children.extend(self._process_node(ch, parent=cls))
+        return cls
+
+    def _handle_function_expression_in_holder(self, holder_node: ts.Node, fn_node: ts.Node, parent: Optional[ParsedNode]) -> ParsedNode:
+        # Name function expressions by the LHS target (e.g., x = function(...) { ... })
+        # Reuse arrow name resolver to extract identifier/property from holder.
+        name = self._resolve_arrow_function_name(holder_node)
+        header = self._build_fn_like_header(fn_node, prefix="function", name=name)
+        kind = NodeKind.METHOD if parent and parent.kind == NodeKind.CLASS else NodeKind.FUNCTION
+        return self._make_node(fn_node, kind=kind, name=name, header=header)
+
     def _build_class_like_header(self, node: ts.Node, *, keyword: str, name: str) -> str:
         code = (get_node_text(node) or "")
         head = code.split("{", 1)[0].strip()
@@ -471,20 +514,29 @@ class TypeScriptCodeParser(AbstractCodeParser):
                         exp.children.append(fn)
                         return [exp]
                     if rhs and rhs.type in ("function_declaration", "function_expression"):
-                        res = self._handle_function(rhs, parent)
-                        for r in res:
-                            exp.children.append(r)
+                        # Name function from assignment LHS
+                        fn = self._handle_function_expression_in_holder(ch, rhs, parent)
+                        exp.children.append(fn)
                         return [exp]
                     if rhs and rhs.type in ("class", "class_declaration", "abstract_class_declaration"):
-                        res = self._handle_class(rhs, parent)
-                        for r in res:
-                            exp.children.append(r)
+                        # Name class from assignment LHS
+                        cls = self._handle_class_expression(ch, rhs, parent)
+                        exp.children.append(cls)
                         return [exp]
                     return [exp]
                 # require() aliasing
                 if rhs and rhs.type == "call_expression":
                     self._collect_require_calls(rhs, alias=(get_node_text(lhs) or "").split(".")[-1] or None)
-                var = self._make_node(ch, kind=NodeKind.VARIABLE, name=None, header=None)
+                # Holder-aware assignment handling outside export:
+                if rhs and rhs.type == "arrow_function":
+                    return [self._handle_arrow_function_in_holder(ch, rhs, parent)]
+                if rhs and rhs.type in ("function_declaration", "function_expression"):
+                    return [self._handle_function_expression_in_holder(ch, rhs, parent)]
+                if rhs and rhs.type in ("class", "class_declaration", "abstract_class_declaration"):
+                    return [self._handle_class_expression(ch, rhs, parent)]
+                # Plain assignment: set variable name from LHS
+                vname = self._resolve_arrow_function_name(ch)
+                var = self._make_node(ch, kind=NodeKind.VARIABLE, name=vname, header=None)
                 var.comment = self._get_preceding_comment(ch)
                 return [var]
             elif ch.type == "call_expression":
@@ -517,7 +569,8 @@ class TypeScriptCodeParser(AbstractCodeParser):
                 out.append(self._handle_arrow_function_in_holder(ch, value_node, parent))
                 continue
             if value_node is not None and value_node.type in ("class", "class_declaration", "abstract_class_declaration"):
-                out.extend(self._handle_class(value_node, parent))
+                # Handle anonymous class expressions by naming from declarator LHS
+                out.append(self._handle_class_expression(ch, value_node, parent))
                 continue
             if value_node is not None and value_node.type == "call_expression":
                 alias = None
