@@ -5,7 +5,7 @@ For languages that don't have explicit docstrings (like Go) current implementati
 hard to generate file summaries with comments as individual nodes and as a comment field.
 ** [ ] TypeScript
 *** [X] Add type parsing
-*** [ ] Fix enum summary generation - need trailing commas
+*** [X] Fix enum summary generation - need trailing commas
 *** [X] Fix `abstract getName(): string` summary generation - missing abstract, etc.
 *** [X] Fix `export {z}`
 *** [ ] Add support for namespace parsing

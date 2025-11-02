@@ -32,9 +32,9 @@ type Point = {
   y: number;
 };
 enum Direction {
-  Up = 1
-  Down
-  Left
+  Up = 1,
+  Down,
+  Left,
   Right
 }
 const CONST = 42

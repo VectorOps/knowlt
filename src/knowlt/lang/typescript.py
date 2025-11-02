@@ -958,6 +958,20 @@ class TypeScriptCodeParser(AbstractCodeParser):
             vname = get_node_text(name_node) or None
             value_node = ch.child_by_field_name("value")
             lhs_header = (get_node_text(name_node) or "").strip()
+            # Preserve any type annotation on the declarator (e.g., ": <T>(arg: T) => T")
+            type_node = ch.child_by_field_name("type") or next(
+                (c for c in ch.named_children if c.type == "type_annotation"),
+                None,
+            )
+            if type_node is not None:
+                type_txt = (get_node_text(type_node) or "").strip()
+                if type_txt:
+                    # If the type text already includes the colon, do not insert an extra space before it.
+                    lhs_header = (
+                        f"{lhs_header}{type_txt}"
+                        if type_txt.startswith(":")
+                        else f"{lhs_header}: {type_txt}"
+                    )
             if value_node is not None:
                 lhs_header = f"{lhs_header} ="
             kind = NodeKind.CONST if raw.startswith("const") else NodeKind.VARIABLE
@@ -1035,7 +1049,7 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
             lines.append(f"{IND}}}")
             return "\n".join(lines)
 
-        if sym.kind in (NodeKind.INTERFACE, NodeKind.ENUM, NodeKind.NAMESPACE):
+        if sym.kind in (NodeKind.INTERFACE, NodeKind.NAMESPACE):
             if header and not header.endswith("{"):
                 header = f"{header} {{"
             lines.append(f"{IND}{header}" if header else f"{IND}<decl> {{")
@@ -1049,6 +1063,32 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
                     )
                     if ch_sum:
                         lines.append(ch_sum)
+            else:
+                lines.append(f"{IND}  ...")
+            lines.append(f"{IND}}}")
+            return "\n".join(lines)
+
+        if sym.kind == NodeKind.ENUM:
+            if header and not header.endswith("{"):
+                header = f"{header} {{"
+            lines.append(f"{IND}{header}" if header else f"{IND}enum {{")
+            if sym.children:
+                for idx, ch in enumerate(sym.children):
+                    ch_sum = self.get_node_summary(
+                        ch,
+                        indent=indent + 2,
+                        include_comments=include_comments,
+                        include_docs=include_docs,
+                    )
+                    if not ch_sum:
+                        continue
+                    first, *rest = ch_sum.splitlines()
+                    first = first.rstrip()
+                    if idx < len(sym.children) - 1 and not first.endswith(","):
+                        first = f"{first},"
+                    lines.append(first)
+                    for ln in rest:
+                        lines.append(ln)
             else:
                 lines.append(f"{IND}  ...")
             lines.append(f"{IND}}}")
