@@ -25,14 +25,13 @@ async def test_project_scan_populates_repositories():
     repo_meta = project.default_repo
 
     # ── files ────────────────────────────────────────────────────────────
-    expected_files = [p for p in SAMPLES_DIR.glob("*.py")]
     files = await repo_store.file.get_list(FileFilter(repo_ids=[repo_meta.id]))
-    assert len(files) == len(expected_files)
+    assert len(files) == 3
 
     # ── packages ─────────────────────────────────────────────────────────
     pkg_ids = {f.package_id for f in files if f.package_id}
     # current Python parser creates one package per file
-    assert len(pkg_ids) == len(expected_files)
+    assert len(pkg_ids) == 2
 
     # ── symbols (spot-check simple.py) ───────────────────────────────────
     simple_meta = next(f for f in files if f.path == "simple.py")

@@ -38,7 +38,7 @@ async def test_build_file_summary_matches_expected_simple_py():
     assert file_summary.path == "simple.py"
 
     # Load expected summary and compare
-    expected_text = (SAMPLES_DIR / "simple.py.sample").read_text(encoding="utf-8")
+    expected_text = (SAMPLES_DIR / "simple.py.summary").read_text(encoding="utf-8")
     assert file_summary.content.strip() == expected_text.strip()
 
 
