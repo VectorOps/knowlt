@@ -469,6 +469,26 @@ class TypeScriptCodeParser(AbstractCodeParser):
         )
         return self._make_node(arrow_node, kind=kind, name=name, header=raw_header)
 
+    def _build_arrow_header_only(self, arrow_node: ts.Node) -> str:
+        """
+        Build a header for an arrow function expression without any LHS holder context,
+        e.g., "() =>" so it can be concatenated after "lhs =".
+        """
+        body_node = arrow_node.child_by_field_name("body")
+        if body_node is not None:
+            return (
+                self.source_bytes[arrow_node.start_byte : body_node.start_byte]
+                .decode("utf8")
+                .strip()
+            )
+        return (get_node_text(arrow_node) or "").split("{", 1)[0].strip()
+
+    def _build_function_expression_header_only(self, fn_node: ts.Node) -> str:
+        body_node = fn_node.child_by_field_name("body") or fn_node.child_by_field_name("statement")
+        if body_node is not None:
+            return self.source_bytes[fn_node.start_byte : body_node.start_byte].decode("utf8").strip()
+        return (get_node_text(fn_node) or "").split("{", 1)[0].strip()
+
     def _resolve_class_expression_name(self, holder_node: ts.Node) -> Optional[str]:
         # Mirror arrow name resolution: prefer declarator/assignment LHS identifiers/properties
         name_node = holder_node.child_by_field_name("name")
@@ -904,35 +924,7 @@ class TypeScriptCodeParser(AbstractCodeParser):
         for ch in node.named_children:
             if ch.type != "variable_declarator":
                 continue
-            value_node = ch.child_by_field_name("value")
-            if value_node is not None and value_node.type == "arrow_function":
-                group.children.append(
-                    self._handle_arrow_function_in_holder(ch, value_node, parent)
-                )
-                continue
-            if value_node is not None and value_node.type in (
-                "class",
-                "class_declaration",
-                "abstract_class_declaration",
-            ):
-                # Handle anonymous class expressions by naming from declarator LHS
-                group.children.append(
-                    self._handle_class_expression(ch, value_node, parent)
-                )
-                continue
-            if value_node is not None and value_node.type == "call_expression":
-                alias = None
-                name_node = ch.child_by_field_name("name") or next(
-                    (
-                        c
-                        for c in ch.named_children
-                        if c.type in ("identifier", "property_identifier")
-                    ),
-                    None,
-                )
-                if name_node is not None:
-                    alias = get_node_text(name_node) or None
-                self._collect_require_calls(value_node, alias=alias)
+            # Resolve LHS and potential alias for require()
             name_node = ch.child_by_field_name("name") or next(
                 (
                     c
@@ -942,15 +934,43 @@ class TypeScriptCodeParser(AbstractCodeParser):
                 None,
             )
             vname = get_node_text(name_node) or None
-            kind = (
-                NodeKind.CONST
-                if (get_node_text(node) or "").lstrip().startswith("const")
-                else NodeKind.VARIABLE
-            )
-            group.children.append(
-                self._make_node(ch, kind=kind, name=vname, header=None)
-            )
-        print(group)
+            value_node = ch.child_by_field_name("value")
+            lhs_header = (get_node_text(name_node) or "").strip()
+            if value_node is not None:
+                lhs_header = f"{lhs_header} ="
+            kind = NodeKind.CONST if raw.startswith("const") else NodeKind.VARIABLE
+            decl = self._make_node(ch, kind=kind, name=vname, header=lhs_header)
+            # Build RHS child when present
+            if value_node is not None:
+                rhs_sym: ParsedNode
+                if value_node.type == "arrow_function":
+                    # Build a function node with header-only arrow part, no LHS
+                    rhs_header = self._build_arrow_header_only(value_node)
+                    rhs_sym = self._make_node(
+                        value_node,
+                        kind=(NodeKind.METHOD if parent and parent.kind == NodeKind.CLASS else NodeKind.FUNCTION),
+                        name=self._resolve_arrow_function_name(ch),
+                        header=rhs_header,
+                    )
+                elif value_node.type in ("class", "class_declaration", "abstract_class_declaration"):
+                    rhs_sym = self._handle_class_expression(ch, value_node, parent)
+                elif value_node.type in ("function_declaration", "function_expression"):
+                    rhs_header = self._build_function_expression_header_only(value_node)
+                    rhs_sym = self._make_node(
+                        value_node,
+                        kind=(NodeKind.METHOD if parent and parent.kind == NodeKind.CLASS else NodeKind.FUNCTION),
+                        name=self._resolve_arrow_function_name(ch),
+                        header=rhs_header,
+                    )
+                else:
+                    if value_node.type == "call_expression":
+                        alias = get_node_text(name_node) or None
+                        self._collect_require_calls(value_node, alias=alias)
+                    rhs_sym = self._make_node(
+                        value_node, kind=NodeKind.LITERAL, name=None, header=None
+                    )
+                decl.children.append(rhs_sym)
+            group.children.append(decl)
         return [group]
 
     def _collect_require_calls(self, node: ts.Node, alias: Optional[str]) -> None:
@@ -1058,20 +1078,32 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
 
         # Single-line rendering for grouped lexical declarations
         if sym.kind == NodeKind.CUSTOM and (sym.subtype or "").lower() == "lexical":
+            keyword = (sym.header or "").strip()
             parts: List[str] = []
-            for ch in sym.children:
-                ch_sum = self.get_node_summary(
-                    ch,
-                    indent=0,
-                    include_comments=False,
-                    include_docs=include_docs,
-                )
-                if not ch_sum:
-                    continue
-                first = ch_sum.splitlines()[0].lstrip()
-                if first:
-                    parts.append(first)
-            return f"{IND}{(sym.header or '').strip()} " + ", ".join(parts)
+            for decl in sym.children:
+                # Expect each child to be a variable/const declarator
+                lhs = (decl.header or decl.name or "").strip()
+                rhs_text = ""
+                if decl.children:
+                    # Render only the first line of the first RHS child
+                    rhs = decl.children[0]
+                    rhs_sum = self.get_node_summary(
+                        rhs,
+                        indent=0,
+                        include_comments=False,
+                        include_docs=include_docs,
+                    )
+                    if rhs_sum:
+                        rhs_text = rhs_sum.splitlines()[0].lstrip()
+                # Compose "lhs rhs" where lhs likely ends with '='
+                lhs_part = lhs.rstrip()
+                if rhs_text:
+                    parts.append(f"{lhs_part} {rhs_text}".strip())
+                else:
+                    # No RHS: avoid trailing "=" in output
+                    parts.append(lhs_part.rstrip("= ").strip())
+            joined = ", ".join(parts)
+            return f"{IND}{keyword} {joined}".rstrip()
 
         # Handle custom export node: prefix "export " to child summaries
         if sym.kind == NodeKind.CUSTOM and (sym.subtype or "").lower() == "export":
