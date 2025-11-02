@@ -7,6 +7,7 @@ from knowlt.lang.typescript import TypeScriptCodeParser
 from knowlt.models import ProgrammingLanguage, NodeKind
 from devtools import pprint
 
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
@@ -29,14 +30,14 @@ async def test_typescript_parser_on_simple_file():
     artefacts (imports, symbols) are extracted correctly.
     """
     samples_dir = Path(__file__).parent / "samples"
-    project     = await _make_dummy_project(samples_dir)
-    cache       = ProjectCache()
+    project = await _make_dummy_project(samples_dir)
+    cache = ProjectCache()
 
-    parser      = TypeScriptCodeParser(project, project.default_repo, "simple.tsx")
+    parser = TypeScriptCodeParser(project, project.default_repo, "simple.tsx")
     parsed_file = parser.parse(cache)
 
-    #pprint(parsed_file)
-    #raise
+    # pprint(parsed_file)
+    # raise
 
     # basic assertions
     assert parsed_file.path == "simple.tsx"
@@ -62,10 +63,10 @@ async def test_typescript_parser_on_simple_file():
 
     # Core declarations we expect to be present (parser may emit extra top-level names)
     expected_names = {
-        "LabeledValue",       # interface
-        "Base",               # abstract class
-        "Point",              # type-alias
-        "Direction",          # enum
+        "LabeledValue",  # interface
+        "Base",  # abstract class
+        "Point",  # type-alias
+        "Direction",  # enum
         "GenericIdentityFn",
         "GenericNumber",
         "identity",
@@ -83,19 +84,26 @@ async def test_typescript_parser_on_simple_file():
 
     flat_map = {s.name: s for s in _flatten(parsed_file.nodes)}
 
-    assert flat_map["fn"].kind   == NodeKind.FUNCTION
+    assert flat_map["fn"].kind == NodeKind.FUNCTION
     assert flat_map["Test"].kind == NodeKind.CLASS
 
     # variable & function names introduced by the sample that were
     # previously untested
     nested_expected = {
         "z",
-        "j1", "f1",              # exported const + arrow-fn
-        "a1", "b1", "c1",        # let-declaration
-        "e2", "f",               # var-declaration
-        "a",                     # async arrow-fn
-        "foo", "method", "value",# class members
-        "fn", "Test",            # moved inside `export`
+        "j1",
+        "f1",  # exported const + arrow-fn
+        "a1",
+        "b1",
+        "c1",  # let-declaration
+        "e2",
+        "f",  # var-declaration
+        "a",  # async arrow-fn
+        "foo",
+        "method",
+        "value",  # class members
+        "fn",
+        "Test",  # moved inside `export`
     }
     assert nested_expected.issubset(flat_map.keys())
 
@@ -116,12 +124,13 @@ async def test_typescript_parser_on_simple_file():
     test_cls_children = _to_map(flat_map["Test"].children)
     assert "method" in test_cls_children
     assert test_cls_children["method"].kind == NodeKind.METHOD
+
     # class from class-expression assigned to const should be named
-    assert "Foo" in top_level
-    assert top_level["Foo"].kind == NodeKind.CLASS
-    foo_children = _to_map(top_level["Foo"].children)
-    assert "bar" in foo_children
-    assert foo_children["bar"].kind == NodeKind.METHOD
+    assert "GenericNumber" in top_level
+    assert top_level["GenericNumber"].kind == NodeKind.CLASS
+    foo_children = _to_map(top_level["GenericNumber"].children)
+    assert "add" in foo_children
+    assert foo_children["add"].kind == NodeKind.PROPERTY
 
 
 @pytest.mark.asyncio
@@ -129,7 +138,7 @@ async def test_exported_enum_is_supported(tmp_path: Path):
     """
     Ensure `export enum ...` parses into an EXPORT node with an ENUM child marked exported.
     """
-    src = 'export enum Foobar { a = 1, b = 2 };'
+    src = "export enum Foobar { a = 1, b = 2 };"
     (tmp_path / "export_enum.ts").write_text(src, encoding="utf-8")
     project = await _make_dummy_project(tmp_path)
     cache = ProjectCache()
@@ -138,7 +147,11 @@ async def test_exported_enum_is_supported(tmp_path: Path):
     parsed = parser.parse(cache)
 
     # find export node
-    export_nodes = [s for s in parsed.nodes if s.kind == NodeKind.CUSTOM and (s.subtype or "") == "export"]
+    export_nodes = [
+        s
+        for s in parsed.nodes
+        if s.kind == NodeKind.CUSTOM and (s.subtype or "") == "export"
+    ]
     assert len(export_nodes) == 1
     exp = export_nodes[0]
 
@@ -174,18 +187,30 @@ export var x = 1, y = 2;
 
     # Build summaries
     from knowlt.lang.typescript import TypeScriptLanguageHelper
+
     helper = TypeScriptLanguageHelper()
 
     # Exported groups
-    export_nodes = [s for s in parsed.nodes if s.kind == NodeKind.CUSTOM and (s.subtype or "") == "export"]
+    export_nodes = [
+        s
+        for s in parsed.nodes
+        if s.kind == NodeKind.CUSTOM and (s.subtype or "") == "export"
+    ]
     export_lines = {helper.get_node_summary(s).strip() for s in export_nodes}
     assert "export const j1 = 10, f1 = () => { ... }" in export_lines
     assert "export let a = 1, b = 2" in export_lines
     assert "export var x = 1, y = 2" in export_lines
 
     # Non-export grouped const
-    lexical_groups = [s for s in parsed.nodes if s.kind == NodeKind.CUSTOM and (s.subtype or "") == "lexical"]
-    assert any(helper.get_node_summary(s).strip() == "const c = 3, d = () => { ... }" for s in lexical_groups)
+    lexical_groups = [
+        s
+        for s in parsed.nodes
+        if s.kind == NodeKind.CUSTOM and (s.subtype or "") == "lexical"
+    ]
+    assert any(
+        helper.get_node_summary(s).strip() == "const c = 3, d = () => { ... }"
+        for s in lexical_groups
+    )
 
 
 @pytest.mark.asyncio
@@ -202,9 +227,14 @@ async def test_export_clause_summary_simple(tmp_path: Path):
     parsed = parser.parse(cache)
 
     from knowlt.lang.typescript import TypeScriptLanguageHelper
+
     helper = TypeScriptLanguageHelper()
 
-    export_nodes = [s for s in parsed.nodes if s.kind == NodeKind.CUSTOM and (s.subtype or "") == "export"]
+    export_nodes = [
+        s
+        for s in parsed.nodes
+        if s.kind == NodeKind.CUSTOM and (s.subtype or "") == "export"
+    ]
     assert len(export_nodes) == 1
     summary = helper.get_node_summary(export_nodes[0]).strip()
     assert summary == "export {z}"

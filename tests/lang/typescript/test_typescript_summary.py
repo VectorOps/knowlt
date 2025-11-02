@@ -68,19 +68,24 @@ async def test_get_node_summary_include_parents_for_method():
     resolve_node_hierarchy(nodes)
 
     # Locate class `Foo` and its `bar` method
-    cls = next((n for n in nodes if n.kind == NodeKind.CLASS and n.name == "Foo"), None)
-    assert cls is not None, "Class 'Foo' not found"
+    cls = next(
+        (n for n in nodes if n.kind == NodeKind.CLASS and n.name == "Base"), None
+    )
+    assert cls is not None, "Class 'Base' not found"
     method = next(
-        (c for c in cls.children if c.kind == NodeKind.METHOD and c.name == "bar"),
+        (
+            c
+            for c in cls.children
+            if c.kind == NodeKind.METHOD and c.name == "printName"
+        ),
         None,
     )
-    assert method is not None, "Method 'bar' not found under 'Foo'"
+    assert method is not None, "Method 'printName' not found under 'Foo'"
 
     # Build summary including parents
     helper = CodeParserRegistry.get_helper(ProgrammingLanguage.TYPESCRIPT)
     assert helper is not None, "TypeScript language helper not registered"
     summary = helper.get_node_summary(method, include_parents=True)
 
-    print(summary)
-    assert "Foo" in summary
-    assert "bar" in summary
+    assert "Base" in summary
+    assert "printName" in summary

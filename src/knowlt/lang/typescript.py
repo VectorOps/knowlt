@@ -942,8 +942,17 @@ class TypeScriptCodeParser(AbstractCodeParser):
                     )
             if value_node is not None:
                 lhs_header = f"{lhs_header} ="
-            kind = NodeKind.CONST if raw.startswith("const") else NodeKind.VARIABLE
-            decl = self._make_node(ch, kind=kind, name=vname, header=lhs_header)
+            # Determine declarator kind: function RHS should be a FUNCTION symbol
+            decl_kind = (
+                NodeKind.CONST if raw.startswith("const") else NodeKind.VARIABLE
+            )
+            if value_node is not None and value_node.type in (
+                "arrow_function",
+                "function_expression",
+                "function_declaration",
+            ):
+                decl_kind = NodeKind.FUNCTION
+            decl = self._make_node(ch, kind=decl_kind, name=vname, header=lhs_header)
             # RHS (generic): delegate to _process_node
             if value_node is not None:
                 rhs_nodes = self._process_node(value_node, parent=decl)
@@ -988,9 +997,48 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
         include_comments: bool = False,
         include_docs: bool = False,
         include_parents: bool = False,
+        child_stack: Optional[List[List[Node]]] = None,
     ) -> str:
+        # If requested, bubble up to the top-most parent and render down,
+        # filtering siblings at each level to the requested child path.
+        if include_parents:
+            if sym.parent_ref:
+                return self.get_node_summary(
+                    sym.parent_ref,
+                    indent,
+                    include_comments,
+                    include_docs,
+                    include_parents,
+                    (child_stack or []) + [[sym]],
+                )
+            else:
+                include_parents = False
+
+        only_children = (child_stack.pop() if child_stack else None)
+
         IND = " " * indent
         lines: List[str] = []
+
+        def emit_children(children: List[Node], child_indent: int) -> None:
+            CH_IND = " " * child_indent
+            # If we’re showing only a subset (include_parents path), emit a placeholder first
+            if only_children:
+                lines.append(f"{CH_IND}...")
+            included = [c for c in children if (not only_children or c in only_children)]
+            if included:
+                for ch in included:
+                    if (not include_comments) and ch.kind == NodeKind.COMMENT:
+                        continue
+                    ch_sum = self.get_node_summary(
+                        ch,
+                        indent=child_indent,
+                        include_comments=include_comments,
+                        include_docs=include_docs,
+                    )
+                    if ch_sum:
+                        lines.append(ch_sum)
+            else:
+                lines.append(f"{CH_IND}...")
 
         if include_comments and sym.comment:
             for ln in (sym.comment or "").splitlines():
@@ -1003,15 +1051,7 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
                 header = f"{header} {{"
             lines.append(f"{IND}{header}" if header else f"{IND}class {{")
             if sym.children:
-                for ch in sym.children:
-                    ch_sum = self.get_node_summary(
-                        ch,
-                        indent=indent + 2,
-                        include_comments=include_comments,
-                        include_docs=include_docs,
-                    )
-                    if ch_sum:
-                        lines.append(ch_sum)
+                emit_children(sym.children, indent + 2)
             else:
                 lines.append(f"{IND}  ...")
             lines.append(f"{IND}}}")
@@ -1022,15 +1062,7 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
                 header = f"{header} {{"
             lines.append(f"{IND}{header}" if header else f"{IND}<decl> {{")
             if sym.children:
-                for ch in sym.children:
-                    ch_sum = self.get_node_summary(
-                        ch,
-                        indent=indent + 2,
-                        include_comments=include_comments,
-                        include_docs=include_docs,
-                    )
-                    if ch_sum:
-                        lines.append(ch_sum)
+                emit_children(sym.children, indent + 2)
             else:
                 lines.append(f"{IND}  ...")
             lines.append(f"{IND}}}")
@@ -1041,7 +1073,11 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
                 header = f"{header} {{"
             lines.append(f"{IND}{header}" if header else f"{IND}enum {{")
             if sym.children:
-                for idx, ch in enumerate(sym.children):
+                # Filter children if summarizing with include_parents
+                included_children = [
+                    ch for ch in sym.children if (not only_children or ch in only_children)
+                ]
+                for idx, ch in enumerate(included_children):
                     ch_sum = self.get_node_summary(
                         ch,
                         indent=indent + 2,
@@ -1052,7 +1088,7 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
                         continue
                     first, *rest = ch_sum.splitlines()
                     first = first.rstrip()
-                    if idx < len(sym.children) - 1 and not first.endswith(","):
+                    if idx < len(included_children) - 1 and not first.endswith(","):
                         first = f"{first},"
                     lines.append(first)
                     for ln in rest:
@@ -1087,7 +1123,11 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
             if not sym.children:
                 return f"{IND}{keyword}"
             out_lines: List[str] = []
-            for idx, decl in enumerate(sym.children):
+            # Filter declarations when summarizing with include_parents
+            decls = [d for d in sym.children if (not only_children or d in only_children)]
+            if only_children and not decls:
+                return f"{IND}{keyword} ..."
+            for idx, decl in enumerate(decls):
                 lhs = (decl.header or decl.name or "").strip()
                 # Avoid dangling '=' if no RHS
                 if not decl.children:
@@ -1130,7 +1170,10 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
             if sym.children:
                 out_lines: List[str] = []
                 prefix = (sym.header or "export").strip()
-                for ch in sym.children:
+                included_children = [
+                    ch for ch in sym.children if (not only_children or ch in only_children)
+                ]
+                for ch in included_children:
                     ch_sum = self.get_node_summary(
                         ch,
                         indent=indent,
@@ -1158,15 +1201,7 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
             lines.append(
                 f"{IND}{header}" if header else f"{IND}{(sym.body or '').strip()}"
             )
-            for ch in sym.children:
-                ch_sum = self.get_node_summary(
-                    ch,
-                    indent=indent + 2,
-                    include_comments=include_comments,
-                    include_docs=include_docs,
-                )
-                if ch_sum:
-                    lines.append(ch_sum)
+            emit_children(sym.children, indent + 2)
             return "\n".join(lines)
 
         body = (sym.body or "").strip()
