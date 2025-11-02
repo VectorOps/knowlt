@@ -52,6 +52,7 @@ class TypeScriptCodeParser(AbstractCodeParser):
             "ambient_declaration": self._handle_ambient_declaration,
             "class_declaration": self._handle_class,
             "abstract_class_declaration": self._handle_class,
+            "class": self._handle_class_expr_top,
             "interface_declaration": self._handle_interface,
             "enum_declaration": self._handle_enum,
             "namespace_declaration": self._handle_namespace,
@@ -172,7 +173,7 @@ class TypeScriptCodeParser(AbstractCodeParser):
         raw = (get_node_text(node) or "").lstrip()
         if raw.startswith("async"):
             async_prefix = "async "
-        nm = name or "<anonymous>"
+        nm = name or ""
         return (
             f"{async_prefix}{prefix}{' ' if prefix else ''}{nm}{tparams}{params}{ret}"
         )
@@ -447,6 +448,20 @@ class TypeScriptCodeParser(AbstractCodeParser):
         )
         return [self._make_node(node, kind=kind, name=None, header=header)]
 
+    def _handle_class_expr_top(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
+        """
+        Generic handler for class expressions (node.type == "class"), building
+        a CLASS node and traversing its body.
+        """
+        header = self._build_class_like_header(node, keyword="class")
+        cls = self._make_node(node, kind=NodeKind.CLASS, name=None, header=header)
+        body = next((c for c in node.children if c.type == "class_body"), None)
+        for ch in (body.named_children if body is not None else node.named_children):
+            cls.children.extend(self._process_node(ch, parent=cls))
+        return [cls]
+
     def _handle_arrow_function_in_holder(
         self, holder_node: ts.Node, arrow_node: ts.Node, parent: Optional[ParsedNode]
     ) -> ParsedNode:
@@ -484,9 +499,15 @@ class TypeScriptCodeParser(AbstractCodeParser):
         return (get_node_text(arrow_node) or "").split("{", 1)[0].strip()
 
     def _build_function_expression_header_only(self, fn_node: ts.Node) -> str:
-        body_node = fn_node.child_by_field_name("body") or fn_node.child_by_field_name("statement")
+        body_node = fn_node.child_by_field_name("body") or fn_node.child_by_field_name(
+            "statement"
+        )
         if body_node is not None:
-            return self.source_bytes[fn_node.start_byte : body_node.start_byte].decode("utf8").strip()
+            return (
+                self.source_bytes[fn_node.start_byte : body_node.start_byte]
+                .decode("utf8")
+                .strip()
+            )
         return (get_node_text(fn_node) or "").split("{", 1)[0].strip()
 
     def _resolve_class_expression_name(self, holder_node: ts.Node) -> Optional[str]:
@@ -924,7 +945,7 @@ class TypeScriptCodeParser(AbstractCodeParser):
         for ch in node.named_children:
             if ch.type != "variable_declarator":
                 continue
-            # Resolve LHS and potential alias for require()
+            # LHS
             name_node = ch.child_by_field_name("name") or next(
                 (
                     c
@@ -940,36 +961,11 @@ class TypeScriptCodeParser(AbstractCodeParser):
                 lhs_header = f"{lhs_header} ="
             kind = NodeKind.CONST if raw.startswith("const") else NodeKind.VARIABLE
             decl = self._make_node(ch, kind=kind, name=vname, header=lhs_header)
-            # Build RHS child when present
+            # RHS (generic): delegate to _process_node
             if value_node is not None:
-                rhs_sym: ParsedNode
-                if value_node.type == "arrow_function":
-                    # Build a function node with header-only arrow part, no LHS
-                    rhs_header = self._build_arrow_header_only(value_node)
-                    rhs_sym = self._make_node(
-                        value_node,
-                        kind=(NodeKind.METHOD if parent and parent.kind == NodeKind.CLASS else NodeKind.FUNCTION),
-                        name=self._resolve_arrow_function_name(ch),
-                        header=rhs_header,
-                    )
-                elif value_node.type in ("class", "class_declaration", "abstract_class_declaration"):
-                    rhs_sym = self._handle_class_expression(ch, value_node, parent)
-                elif value_node.type in ("function_declaration", "function_expression"):
-                    rhs_header = self._build_function_expression_header_only(value_node)
-                    rhs_sym = self._make_node(
-                        value_node,
-                        kind=(NodeKind.METHOD if parent and parent.kind == NodeKind.CLASS else NodeKind.FUNCTION),
-                        name=self._resolve_arrow_function_name(ch),
-                        header=rhs_header,
-                    )
-                else:
-                    if value_node.type == "call_expression":
-                        alias = get_node_text(name_node) or None
-                        self._collect_require_calls(value_node, alias=alias)
-                    rhs_sym = self._make_node(
-                        value_node, kind=NodeKind.LITERAL, name=None, header=None
-                    )
-                decl.children.append(rhs_sym)
+                rhs_nodes = self._process_node(value_node, parent=decl)
+                for rn in rhs_nodes:
+                    decl.children.append(rn)
             group.children.append(decl)
         return [group]
 
@@ -1079,31 +1075,47 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
         # Single-line rendering for grouped lexical declarations
         if sym.kind == NodeKind.CUSTOM and (sym.subtype or "").lower() == "lexical":
             keyword = (sym.header or "").strip()
-            parts: List[str] = []
-            for decl in sym.children:
-                # Expect each child to be a variable/const declarator
+            if not sym.children:
+                return f"{IND}{keyword}"
+            out_lines: List[str] = []
+            print(sym)
+            for idx, decl in enumerate(sym.children):
+                print(decl)
                 lhs = (decl.header or decl.name or "").strip()
-                rhs_text = ""
-                if decl.children:
-                    # Render only the first line of the first RHS child
-                    rhs = decl.children[0]
-                    rhs_sum = self.get_node_summary(
-                        rhs,
-                        indent=0,
-                        include_comments=False,
-                        include_docs=include_docs,
+                # Avoid dangling '=' if no RHS
+                if not decl.children:
+                    lhs = lhs.rstrip("= ").strip()
+                    if idx == 0:
+                        if lhs:
+                            out_lines.append(f"{IND}{keyword} {lhs}".rstrip())
+                    else:
+                        if out_lines:
+                            out_lines[-1] = f"{out_lines[-1]}, {lhs}".rstrip()
+                    continue
+                rhs = decl.children[0]
+                rhs_sum = self.get_node_summary(
+                    rhs,
+                    indent=0,
+                    include_comments=include_comments,
+                    include_docs=include_docs,
+                )
+                rhs_lines = rhs_sum.splitlines() if rhs_sum else [""]
+                first_rhs = (rhs_lines[0] if rhs_lines else "").lstrip()
+                if idx == 0:
+                    # Start line with keyword
+                    out_lines.append(
+                        f"{IND}{keyword} {lhs.rstrip()} {first_rhs}".rstrip()
                     )
-                    if rhs_sum:
-                        rhs_text = rhs_sum.splitlines()[0].lstrip()
-                # Compose "lhs rhs" where lhs likely ends with '='
-                lhs_part = lhs.rstrip()
-                if rhs_text:
-                    parts.append(f"{lhs_part} {rhs_text}".strip())
                 else:
-                    # No RHS: avoid trailing "=" in output
-                    parts.append(lhs_part.rstrip("= ").strip())
-            joined = ", ".join(parts)
-            return f"{IND}{keyword} {joined}".rstrip()
+                    # Append to the current line with comma separation
+                    if out_lines:
+                        out_lines[-1] = (
+                            f"{out_lines[-1]}, {lhs.rstrip()} {first_rhs}".rstrip()
+                        )
+                # Append any extra RHS lines as-is
+                for ln in rhs_lines[1:]:
+                    out_lines.append(f"{IND}{ln}")
+            return "\n".join(out_lines)
 
         # Handle custom export node: prefix "export " to child summaries
         if sym.kind == NodeKind.CUSTOM and (sym.subtype or "").lower() == "export":
