@@ -1,15 +1,36 @@
 #+title: Know Lite
+* [ ] General
+** [ ] Prase unknown files that are not binary as text
+** [ ] Write data model documentation
+** [ ] Add a way to initialize project, but only scan and work from a subpath
+** [ ] Method to fully reparse the repo in project
+** [ ] Add a way to override file mapping. For example, .h might point to C or ObjC parser.
+* [ ] Performance
+** [ ] Create partial refresh API
+** [ ] Optimize finding of deleted files
+** [ ] Optimize chunker to tokenize and then de-tokenize to generate result, as an optimization?
+** [ ] Do not refresh DuckDB index if project did not change
+** [ ] Search to support exclude. For example - tests
+* [ ] Tools
+** [ ] Add a way to fully disable a tool so it won't register any components
 * [ ] Parsers
 ** [ ] Rethink comments vs docstrings logic. Maybe combine include_comments and include_docs.
 For languages that don't have explicit docstrings (like Go) current implementation makes it
 hard to generate file summaries with comments as individual nodes and as a comment field.
 ** [ ] TypeScript
+*** [ ] Add literal nodes to suppress warnings
 *** [X] Add type parsing
 *** [X] Fix enum summary generation - need trailing commas
 *** [X] Fix `abstract getName(): string` summary generation - missing abstract, etc.
 *** [X] Fix `export {z}`
 *** [ ] Add support for namespace parsing
 *** [X] Fix `const Foo = class {` summary generation - returns as `const class Foo {` and no children
-*** [ ] Add support for export default `export default function MyApp() { ... }`
-*** [ ] Fix commonJs export: `exports.area = (r) => PI * r ** 2` produces `export exports.area = (r) => { ... }`
-*** [ ] Fix include_parents for summary generator
+*** [X] Add support for export default `export default function MyApp() { ... }`
+*** [X] Fix commonJs export: `exports.area = (r) => PI * r ** 2` produces `export exports.area = (r) => { ... }`
+*** [X] Fix include_parents for summary generator
+** [ ] JavaScript
+** [ ] Java
+** [ ] HTML
+** [ ] C
+* [ ] Storage
+** [ ] Add query timeouts to DuckDB to detect lockups
