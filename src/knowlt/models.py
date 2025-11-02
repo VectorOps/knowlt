@@ -128,6 +128,7 @@ class Node(BaseModel):
     subtype: Optional[str] = None
     docstring: Optional[str] = None
     comment: Optional[str] = None
+    custom_value: Optional[str] = None
 
     start_line: int = 0
     end_line: int = 0
