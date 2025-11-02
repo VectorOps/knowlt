@@ -1124,7 +1124,8 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
                     out_lines.append(f"{IND}{ln}")
             return "\n".join(out_lines)
 
-        # Handle custom export node: prefix export header (supports "export default") to child summaries
+        # Handle custom export node: prefix export header (supports "export default") to child summaries.
+        # Special-case CommonJS assignments (exports.* / module.exports) to avoid double "export" prefix.
         if sym.kind == NodeKind.CUSTOM and (sym.subtype or "").lower() == "export":
             if sym.children:
                 out_lines: List[str] = []
@@ -1139,7 +1140,13 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
                     if not ch_sum:
                         continue
                     first, *rest = ch_sum.splitlines()
-                    out_lines.append(f"{IND}{prefix} {first.lstrip()}")
+                    first_trim = first.lstrip()
+                    # If the child already renders as a CommonJS export assignment,
+                    # do not add the "export" prefix.
+                    if first_trim.startswith("exports.") or first_trim.startswith("module.exports"):
+                        out_lines.append(f"{IND}{first_trim}")
+                    else:
+                        out_lines.append(f"{IND}{prefix} {first_trim}")
                     for ln in rest:
                         out_lines.append(f"{IND}{ln}")
                 return "\n".join(out_lines)
