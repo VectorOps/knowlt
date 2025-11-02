@@ -440,7 +440,8 @@ class TypeScriptCodeParser(AbstractCodeParser):
     def _handle_arrow_function_top(
         self, node: ts.Node, parent: Optional[ParsedNode]
     ) -> List[ParsedNode]:
-        header = self._build_fn_like_header(node, prefix="", name=None)
+        # Preserve arrow token and any type params/return annotations from source
+        header = self._build_arrow_header_only(node)
         kind = (
             NodeKind.METHOD
             if parent and parent.kind == NodeKind.CLASS
@@ -1078,9 +1079,7 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
             if not sym.children:
                 return f"{IND}{keyword}"
             out_lines: List[str] = []
-            print(sym)
             for idx, decl in enumerate(sym.children):
-                print(decl)
                 lhs = (decl.header or decl.name or "").strip()
                 # Avoid dangling '=' if no RHS
                 if not decl.children:
