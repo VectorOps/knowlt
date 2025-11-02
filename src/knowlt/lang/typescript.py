@@ -295,7 +295,7 @@ class TypeScriptCodeParser(AbstractCodeParser):
         )
         if source_node and source_node.type == "from_clause":
             source_node = source_node.child_by_field_name("source")
-        results: List[ParsedNode] = []
+        # Case 1: re-export (export ... from "module")
         if source_node and source_node.type == "string":
             module = (get_node_text(source_node) or "").strip("\"'")
             physical, virtual, external = self._resolve_module(module)
@@ -310,7 +310,7 @@ class TypeScriptCodeParser(AbstractCodeParser):
                     raw=raw_stmt,
                 )
             )
-            # Emit a CUSTOM export node to mirror old EXPORT behavior
+            # Keep the full header text for re-exports
             exp = self._make_node(
                 node,
                 kind=NodeKind.CUSTOM,
@@ -318,9 +318,8 @@ class TypeScriptCodeParser(AbstractCodeParser):
                 header=raw_stmt.strip(),
                 subtype="export",
             )
-            results.append(exp)
-            return results
-        # Named export without source: `export { a, b as c }`
+            return [exp]
+        # Case 2: named export without source: `export { a, b as c }`
         if any(c.type == "export_clause" for c in node.named_children):
             exp = self._make_node(
                 node,
@@ -330,60 +329,29 @@ class TypeScriptCodeParser(AbstractCodeParser):
                 subtype="export",
             )
             return [exp]
-        # Local export: wrap declarations in a CUSTOM export node and mark inner nodes exported.
+        # Case 3: local export — delegate to generic processing for inner nodes
+        is_default = "export default" in raw_stmt
         exp = self._make_node(
-            node, kind=NodeKind.CUSTOM, name=None, header="export", subtype="export"
+            node,
+            kind=NodeKind.CUSTOM,
+            name=None,
+            header="export default" if is_default else "export",
+            subtype="export",
         )
-        results.append(exp)
         for ch in node.named_children:
-            if ch.type in ("function_declaration", "function_expression"):
-                decls = self._handle_function(ch, parent=parent)
-                for d in decls:
-                    exp.children.append(d)
-            elif ch.type in ("arrow_function",):
-                decls = self._handle_arrow_function_top(ch, parent)
-                for d in decls:
-                    exp.children.append(d)
-            elif ch.type == "satisfies_expression":
-                # e.g., export default { ... } satisfies Config
-                for d in self._handle_satisfies_expression(ch, parent):
-                    exp.children.append(d)
-            elif ch.type == "type_alias_declaration":
-                decls = self._handle_type_alias(ch, parent=parent)
-                for d in decls:
-                    exp.children.append(d)
-            elif ch.type == "call_expression":
-                # Support patterns like: export default defineConfig(...)
-                for d in self._handle_call_expression(ch, parent):
-                    exp.children.append(d)
-            elif ch.type in ("class_declaration", "abstract_class_declaration"):
-                decls = self._handle_class(ch, parent=parent)
-                for d in decls:
-                    exp.children.append(d)
-            elif ch.type == "interface_declaration":
-                decls = self._handle_interface(ch, parent=parent)
-                for d in decls:
-                    exp.children.append(d)
-            elif ch.type == "enum_declaration":
-                decls = self._handle_enum(ch, parent=parent)
-                for d in decls:
-                    exp.children.append(d)
-            elif ch.type in ("variable_declaration", "lexical_declaration"):
-                decls = self._handle_lexical(ch, parent=parent)
-                for d in decls:
-                    exp.children.append(d)
-            elif ch.type in ("identifier", "property_identifier"):
-                # e.g., export default ChatMessage
+            # Skip export syntax wrappers already handled
+            if ch.type in ("export_clause", "from_clause", "string"):
+                continue
+            # Special-case: `export default Identifier`
+            if ch.type in ("identifier", "property_identifier"):
                 txt = (get_node_text(ch) or "").strip() or None
                 exp.children.append(
                     self._make_node(ch, kind=NodeKind.LITERAL, name=txt, header=txt)
                 )
-            elif ch.type in ("export_clause",):
-                # e.g., export { a, b }
-                pass
-            else:
-                self._debug_unknown_node(ch, context="export.inner")
-        return results
+                continue
+            # Default path: recursively parse inner node(s)
+            exp.children.extend(self._process_node(ch, parent=parent))
+        return [exp]
 
     def _handle_function(
         self, node: ts.Node, parent: Optional[ParsedNode]
@@ -1156,10 +1124,11 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
                     out_lines.append(f"{IND}{ln}")
             return "\n".join(out_lines)
 
-        # Handle custom export node: prefix "export " to child summaries
+        # Handle custom export node: prefix export header (supports "export default") to child summaries
         if sym.kind == NodeKind.CUSTOM and (sym.subtype or "").lower() == "export":
             if sym.children:
                 out_lines: List[str] = []
+                prefix = (sym.header or "export").strip()
                 for ch in sym.children:
                     ch_sum = self.get_node_summary(
                         ch,
@@ -1170,7 +1139,7 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
                     if not ch_sum:
                         continue
                     first, *rest = ch_sum.splitlines()
-                    out_lines.append(f"{IND}export {first.lstrip()}")
+                    out_lines.append(f"{IND}{prefix} {first.lstrip()}")
                     for ln in rest:
                         out_lines.append(f"{IND}{ln}")
                 return "\n".join(out_lines)
