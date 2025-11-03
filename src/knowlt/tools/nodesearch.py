@@ -1,0 +1,216 @@
+from typing import Sequence, Optional, Any
+import json
+
+from pydantic import BaseModel, Field
+
+from knowlt.data import NodeSearchQuery
+from knowlt.models import NodeKind, Visibility
+from knowlt.project import ProjectManager, VIRTUAL_PATH_PREFIX
+from .base import BaseTool, MCPToolDefinition
+from knowlt.file_summary import SummaryMode
+from knowlt.parsers import (
+    CodeParserRegistry,
+    AbstractCodeParser,
+    AbstractLanguageHelper,
+)
+from knowlt.models import File
+from knowlt.settings import ToolOutput
+from knowlt.data_helpers import post_process_search_results
+
+
+class NodeSearchReq(BaseModel):
+    global_search: bool = Field(
+        default=True, description="Search through all repos in the project."
+    )
+    visibility: Optional[Visibility | str] = Field(
+        default="all",
+        description=(
+            "Restrict by visibility modifier (`public`, `protected`, `private`) or use `all` to include "
+            "every symbol. Defaults to `all`."
+        ),
+    )
+    query: Optional[str] = Field(
+        default=None,
+        description=(
+            "Natural-language search string evaluated against docstrings, comments, and code with both "
+            "full-text and vector search. Use when you don’t know the exact name."
+        ),
+    )
+    limit: Optional[int] = Field(
+        default=10, description="Maximum number of results to return."
+    )
+    offset: Optional[int] = Field(
+        default=0, description="Number of results to skip. Used for pagination."
+    )
+    summary_mode: SummaryMode | str = Field(
+        default=SummaryMode.Definition,
+        description="Amount of source code to include with each match",
+    )
+
+
+class NodeSearchResult(BaseModel):
+    visibility: Optional[str] = Field(
+        default=None,
+        description="The visibility of the symbol (e.g., 'public', 'private').",
+    )
+    file_path: Optional[str] = Field(
+        default=None, description="The path to the file containing the symbol."
+    )
+    body: Optional[str] = Field(
+        default=None,
+        description="The summary or body of the symbol, depending on the summary_mode.",
+    )
+
+
+class NodeSearchTool(BaseTool):
+    tool_name = "vectorops_search"
+    tool_input = NodeSearchReq
+    default_output = ToolOutput.STRUCTURED_TEXT
+
+    async def execute(
+        self,
+        pm: ProjectManager,
+        req: Any,
+    ) -> str:
+        req = self.parse_input(req)
+        await pm.maybe_refresh()
+
+        # visibility
+        vis = None
+        if isinstance(req.visibility, Visibility):
+            vis = req.visibility
+        elif isinstance(req.visibility, str):
+            if req.visibility.lower() == "all":
+                vis = None
+            else:
+                try:
+                    vis = Visibility(req.visibility)
+                except ValueError:
+                    valid_vis = [v.value for v in Visibility] + ["all"]
+                    raise ValueError(
+                        f"Invalid visibility '{req.visibility}'. Valid values are: {valid_vis}"
+                    )
+
+        # summary_mode
+        summary_mode = req.summary_mode
+        if isinstance(summary_mode, str):
+            try:
+                summary_mode = SummaryMode(summary_mode)
+            except ValueError:
+                valid_modes = [m.value for m in SummaryMode]
+                raise ValueError(
+                    f"Invalid summary_mode '{req.summary_mode}'. Valid values are: {valid_modes}"
+                )
+
+        # transform free-text query -> embedding vector (if requested)
+        embedding_vec = None
+        if req.query:
+            embedding_vec = await pm.compute_embedding(req.query)
+
+        if req.global_search:
+            repo_ids = pm.repo_ids
+        else:
+            repo_ids = [pm.default_repo.id]
+
+        final_limit = req.limit or 25
+
+        query = NodeSearchQuery(
+            repo_ids=repo_ids,
+            symbol_name=req.symbol_name,
+            visibility=vis,
+            doc_needle=req.query,
+            embedding_query=embedding_vec,
+            boost_repo_id=pm.default_repo.id,
+            repo_boost_factor=pm.settings.search.default_repo_boost,
+            limit=final_limit,
+            offset=req.offset,
+        )
+
+        nodes = await pm.data.node.search(query)
+        nodes = await post_process_search_results(pm.data.node, nodes, final_limit)
+
+        file_repo = pm.data.file
+
+        results: list[NodeSearchResult] = []
+        for s in nodes:
+            helper: Optional[AbstractLanguageHelper] = None
+
+            # TODO: Optimize to dedupe and get a list of files by ids
+            fm: Optional[File] = None
+            file_path = None
+            if s.file_id:
+                fm = await file_repo.get_by_id(s.file_id)
+                file_path = (
+                    pm.construct_virtual_path(s.repo_id, fm.path) if fm else None
+                )
+
+                if fm and fm.language:
+                    helper = CodeParserRegistry.get_helper(fm.language)
+
+            sym_body: Optional[str] = None
+            if summary_mode != SummaryMode.Skip:
+                if summary_mode == SummaryMode.Source:
+                    sym_body = s.body
+                elif helper is not None:
+                    include_docs = summary_mode == SummaryMode.Documentation
+                    include_comments = summary_mode == SummaryMode.Documentation
+                    sym_body = helper.get_symbol_summary(
+                        s,
+                        include_comments=include_comments,
+                        include_docs=include_docs,
+                        include_parents=True,
+                    )  # type: ignore[call-arg]
+
+            results.append(
+                NodeSearchResult(
+                    name=s.name,
+                    kind=s.kind,
+                    visibility=s.visibility,
+                    file_path=file_path,
+                    body=sym_body,
+                )
+            )
+        return self.encode_output(pm, results)
+
+    def get_openai_schema(self) -> dict:
+        visibility_enum = [v.value for v in Visibility] + ["all"]
+        summary_enum = [m.value for m in SummaryMode]
+
+        return {
+            "name": self.tool_name,
+            "description": (
+                "Search for code blocks (functions, classes, variables, etc.) in the current repository. "
+                f"All supplied filters are combined with logical **AND**. If the file path contains {VIRTUAL_PATH_PREFIX} "
+                "then it is not part of the current repository and should be only considered as an external "
+                "dependency."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "visibility": {
+                        "type": "string",
+                        "enum": visibility_enum,
+                        "description": (
+                            "Restrict by visibility modifier (`public`, `protected`, `private`) "
+                            "or use `all` to include every symbol. Defaults to `all`."
+                        ),
+                        "default": "all",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Natural-language search string evaluated against docstrings, comments, and code "
+                            "with both full-text and vector search. Use when you don’t know the exact name."
+                        ),
+                    },
+                    "summary_mode": {
+                        "type": "string",
+                        "enum": summary_enum,
+                        "default": SummaryMode.Definition.value,
+                        "description": (
+                            "Amount of source code to include with each match"
+                        ),
+                    },
+                },
+            },
+        }
