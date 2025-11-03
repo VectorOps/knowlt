@@ -68,6 +68,19 @@ class TypeScriptCodeParser(AbstractCodeParser):
             "expression_statement": self._handle_expression,
             "empty_statement": self._literal_handler(NodeKind.LITERAL),
             "hash_bang_line": self._literal_handler(NodeKind.LITERAL),
+            "number": self._literal_handler(NodeKind.LITERAL),
+            "string": self._literal_handler(NodeKind.LITERAL),
+            "null": self._literal_handler(NodeKind.LITERAL),
+            "as_expression": self._literal_handler(NodeKind.LITERAL),
+            "new_expression": self._literal_handler(NodeKind.LITERAL),
+            "binary_expression": self._literal_handler(NodeKind.LITERAL),
+            "ternary_expression": self._literal_handler(NodeKind.LITERAL),
+            "identifier": self._literal_handler(NodeKind.LITERAL),
+            "template_string": self._literal_handler(NodeKind.LITERAL),
+            "statement_block": self._literal_handler(NodeKind.LITERAL),
+            "array": self._literal_handler(NodeKind.LITERAL),
+            "object": self._literal_handler(NodeKind.LITERAL),
+            "member_expression": self._literal_handler(NodeKind.LITERAL),
             "type_alias_declaration": self._handle_type_alias,
         }
 
@@ -943,9 +956,7 @@ class TypeScriptCodeParser(AbstractCodeParser):
             if value_node is not None:
                 lhs_header = f"{lhs_header} ="
             # Determine declarator kind: function RHS should be a FUNCTION symbol
-            decl_kind = (
-                NodeKind.CONST if raw.startswith("const") else NodeKind.VARIABLE
-            )
+            decl_kind = NodeKind.CONST if raw.startswith("const") else NodeKind.VARIABLE
             if value_node is not None and value_node.type in (
                 "arrow_function",
                 "function_expression",
@@ -1014,7 +1025,7 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
             else:
                 include_parents = False
 
-        only_children = (child_stack.pop() if child_stack else None)
+        only_children = child_stack.pop() if child_stack else None
 
         IND = " " * indent
         lines: List[str] = []
@@ -1024,7 +1035,9 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
             # If we’re showing only a subset (include_parents path), emit a placeholder first
             if only_children:
                 lines.append(f"{CH_IND}...")
-            included = [c for c in children if (not only_children or c in only_children)]
+            included = [
+                c for c in children if (not only_children or c in only_children)
+            ]
             if included:
                 for ch in included:
                     if (not include_comments) and ch.kind == NodeKind.COMMENT:
@@ -1075,7 +1088,9 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
             if sym.children:
                 # Filter children if summarizing with include_parents
                 included_children = [
-                    ch for ch in sym.children if (not only_children or ch in only_children)
+                    ch
+                    for ch in sym.children
+                    if (not only_children or ch in only_children)
                 ]
                 for idx, ch in enumerate(included_children):
                     ch_sum = self.get_node_summary(
@@ -1124,7 +1139,9 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
                 return f"{IND}{keyword}"
             out_lines: List[str] = []
             # Filter declarations when summarizing with include_parents
-            decls = [d for d in sym.children if (not only_children or d in only_children)]
+            decls = [
+                d for d in sym.children if (not only_children or d in only_children)
+            ]
             if only_children and not decls:
                 return f"{IND}{keyword} ..."
             for idx, decl in enumerate(decls):
@@ -1171,7 +1188,9 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
                 out_lines: List[str] = []
                 prefix = (sym.header or "export").strip()
                 included_children = [
-                    ch for ch in sym.children if (not only_children or ch in only_children)
+                    ch
+                    for ch in sym.children
+                    if (not only_children or ch in only_children)
                 ]
                 for ch in included_children:
                     ch_sum = self.get_node_summary(
@@ -1186,7 +1205,9 @@ class TypeScriptLanguageHelper(AbstractLanguageHelper):
                     first_trim = first.lstrip()
                     # If the child already renders as a CommonJS export assignment,
                     # do not add the "export" prefix.
-                    if first_trim.startswith("exports.") or first_trim.startswith("module.exports"):
+                    if first_trim.startswith("exports.") or first_trim.startswith(
+                        "module.exports"
+                    ):
                         out_lines.append(f"{IND}{first_trim}")
                     else:
                         out_lines.append(f"{IND}{prefix} {first_trim}")
