@@ -1,1 +1,1 @@
-from . import python, text, markdown, golang, typescript
+from . import python, text, markdown, golang, typescript, javascript
