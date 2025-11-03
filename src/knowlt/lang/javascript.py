@@ -46,6 +46,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
             "class_declaration": self._handle_class,
             "class": self._handle_class_expr_top,
             "method_definition": self._handle_method,
+            # Class fields (e.g., value = 0; foo = () => { ... })
             "variable_declaration": self._handle_lexical,
             "lexical_declaration": self._handle_lexical,
             "comment": self._handle_comment,
@@ -441,6 +442,22 @@ class JavaScriptCodeParser(AbstractCodeParser):
         )
         return self._make_node(fn_node, kind=kind, name=name, header=header)
 
+    def _handle_arrow_function_in_holder(
+        self, holder_node: ts.Node, arrow_node: ts.Node, parent: Optional[ParsedNode]
+    ) -> ParsedNode:
+        """
+        Handle arrow functions assigned within a holder (e.g., variable assignment or export).
+        Resolves the name from the holder and uses an arrow-only header for summaries.
+        """
+        name = self._resolve_arrow_function_name(holder_node)
+        header = self._build_arrow_header_only(arrow_node)
+        kind = (
+            NodeKind.METHOD
+            if parent and parent.kind == NodeKind.CLASS
+            else NodeKind.FUNCTION
+        )
+        return self._make_node(arrow_node, kind=kind, name=name, header=header)
+
     def _handle_class_expression(
         self, holder_node: ts.Node, class_node: ts.Node, parent: Optional[ParsedNode]
     ) -> ParsedNode:
@@ -552,7 +569,9 @@ class JavaScriptCodeParser(AbstractCodeParser):
                     return [self._handle_class_expression(ch, rhs, parent)]
                 # Plain assignment: set variable name from LHS
                 vname = self._resolve_arrow_function_name(ch)
-                var = self._make_node(ch, kind=NodeKind.VARIABLE, name=vname, header=None)
+                var = self._make_node(
+                    ch, kind=NodeKind.VARIABLE, name=vname, header=None
+                )
                 var.comment = self._get_preceding_comment(ch)
                 return [var]
             elif ch.type == "call_expression":
@@ -873,6 +892,7 @@ class JavaScriptLanguageHelper(AbstractLanguageHelper):
             lines.append(
                 f"{IND}{header}" if header else f"{IND}{(sym.body or '').strip()}"
             )
+
             def emit_children_only(children):
                 CH_IND = " " * (indent + 2)
                 if only_children:
@@ -894,6 +914,7 @@ class JavaScriptLanguageHelper(AbstractLanguageHelper):
                             lines.append(ch_sum)
                 else:
                     lines.append(f"{CH_IND}...")
+
             emit_children_only(sym.children)
             return "\n".join(lines)
 
@@ -904,9 +925,40 @@ class JavaScriptLanguageHelper(AbstractLanguageHelper):
 
     def get_common_syntax_words(self) -> set[str]:
         return {
-            "break", "case", "catch", "class", "const", "continue", "do",
-            "else", "export", "extends", "false", "finally", "for", "function", "if",
-            "import", "in", "instanceof", "let", "new", "null",
-            "return", "super", "switch", "this", "throw", "true", "try", "typeof",
-            "undefined", "var", "void", "while", "with", "async", "await",
+            "break",
+            "case",
+            "catch",
+            "class",
+            "const",
+            "continue",
+            "do",
+            "else",
+            "export",
+            "extends",
+            "false",
+            "finally",
+            "for",
+            "function",
+            "if",
+            "import",
+            "in",
+            "instanceof",
+            "let",
+            "new",
+            "null",
+            "return",
+            "super",
+            "switch",
+            "this",
+            "throw",
+            "true",
+            "try",
+            "typeof",
+            "undefined",
+            "var",
+            "void",
+            "while",
+            "with",
+            "async",
+            "await",
         }
