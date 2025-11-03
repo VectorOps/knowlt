@@ -46,6 +46,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
             "class_declaration": self._handle_class,
             "class": self._handle_class_expr_top,
             "method_definition": self._handle_method,
+            "field_definition": self._handle_class_field,
             # Class fields (e.g., value = 0; foo = () => { ... })
             "variable_declaration": self._handle_lexical,
             "lexical_declaration": self._handle_lexical,
@@ -446,11 +447,22 @@ class JavaScriptCodeParser(AbstractCodeParser):
         self, holder_node: ts.Node, arrow_node: ts.Node, parent: Optional[ParsedNode]
     ) -> ParsedNode:
         """
-        Handle arrow functions assigned within a holder (e.g., variable assignment or export).
-        Resolves the name from the holder and uses an arrow-only header for summaries.
+        Handle arrow functions assigned within a holder (e.g., class field, assignment, export).
+        Resolves the name from the holder and builds a header that includes the LHS (e.g., "foo = () =>").
         """
         name = self._resolve_arrow_function_name(holder_node)
-        header = self._build_arrow_header_only(arrow_node)
+        body_node = arrow_node.child_by_field_name("body")
+        if body_node is not None:
+            # Include holder/LHS text through the start of the arrow body
+            header = (
+                self.source_bytes[holder_node.start_byte : body_node.start_byte]
+                .decode("utf8")
+                .rstrip()
+            )
+        else:
+            header = (
+                (get_node_text(holder_node) or "").split("{", 1)[0].strip().rstrip(";")
+            )
         kind = (
             NodeKind.METHOD
             if parent and parent.kind == NodeKind.CLASS
@@ -508,6 +520,49 @@ class JavaScriptCodeParser(AbstractCodeParser):
                 node, kind=NodeKind.METHOD, name=name, header=header, subtype=None
             )
         ]
+
+    def _handle_class_field(
+        self, node: ts.Node, parent: Optional[ParsedNode]
+    ) -> List[ParsedNode]:
+        """
+        Handle JavaScript class fields (field_definition), including cases like:
+          - foo = () => { ... }
+          - foo = function(...) { ... }
+          - foo = class { ... }
+          - foo = 123
+        Arrow/function/class values are parsed and attached as children (methods/classes).
+        Plain values produce a PROPERTY node.
+        """
+        # Property name may be exposed as "name" or "property" depending on the grammar version.
+        name_node = (
+            node.child_by_field_name("name")
+            or node.child_by_field_name("property")
+            or next(
+                (
+                    c
+                    for c in node.named_children
+                    if c.type in ("identifier", "property_identifier")
+                ),
+                None,
+            )
+        )
+        pname = get_node_text(name_node) or None
+        value_node = node.child_by_field_name("value")
+        out: List[ParsedNode] = []
+        if value_node is not None:
+            if value_node.type == "arrow_function":
+                out.append(self._handle_arrow_function_in_holder(node, value_node, parent))
+            elif value_node.type in ("function_expression", "function_declaration"):
+                out.append(
+                    self._handle_function_expression_in_holder(node, value_node, parent)
+                )
+            elif value_node.type in ("class", "class_declaration"):
+                out.append(self._handle_class_expression(node, value_node, parent))
+            else:
+                out.append(self._make_node(node, kind=NodeKind.PROPERTY, name=pname, header=None))
+        else:
+            out.append(self._make_node(node, kind=NodeKind.PROPERTY, name=pname, header=None))
+        return out
 
     def _handle_comment(
         self, node: ts.Node, parent: Optional[ParsedNode]

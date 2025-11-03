@@ -38,7 +38,7 @@ const Foo = class {
   bar() { ... }
 }
 // assignment with arrow-fn
-window.onload = () => { ... };
+window.onload = () => { ... }
 // multi-assignment
 HORIZONTAL, VERTICAL = 1, 2;
 // plain function
