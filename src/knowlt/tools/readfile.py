@@ -1,0 +1,184 @@
+import os
+import base64
+import mimetypes
+import json
+from typing import Any
+from pydantic import BaseModel, Field
+
+from knowlt.project import ProjectManager, VIRTUAL_PATH_PREFIX
+from knowlt.settings import ProjectSettings, ToolOutput
+from .base import BaseTool
+
+
+class ReadFileReq(BaseModel):
+    """Request model for reading a file."""
+
+    path: str = Field(description="Project file path (virtual or plain) to read.")
+
+
+class ReadFileResp(BaseModel):
+    status: int
+    content_type: str | None = Field(default=None, alias="content-type")
+    content_encoding: str | None = Field(default=None, alias="content-encoding")
+    body: str | None = None
+    error: str | None = None
+
+
+class ReadFilesTool(BaseTool):
+    """Tool to read a file and return an HTTP-like response (JSON or text)."""
+
+    tool_name = "read_files"
+    tool_input = ReadFileReq
+    default_output = ToolOutput.STRUCTURED_TEXT
+
+    async def execute(
+        self,
+        pm: ProjectManager,
+        req: Any,
+    ) -> str:
+        req_obj = self.parse_input(req)
+        """
+        Read a file and return an HTTP-like response string (JSON or structured text),
+        representing an HTTP-like response:
+        {
+          "status": <int>,                     # HTTP-style status code
+          "content-type": <str> | None,        # e.g. "text/plain; charset=utf-8"
+          "content-encoding": <str> | None,    # "identity" or "base64"
+          "body": <str> | None,                # text or base64 content
+          "error": <str> | None                # present on errors
+        }
+        """
+        await pm.maybe_refresh()
+
+        file_repo = pm.data.file
+        raw_path = req_obj.path or ""
+        if not raw_path:
+            return self.encode_output(
+                pm,
+                ReadFileResp(
+                    status=400,
+                    content_type=None,
+                    content_encoding=None,
+                    body=None,
+                    error="Empty path",
+                ),
+            )
+
+        decon = pm.deconstruct_virtual_path(raw_path)
+        if not decon:
+            return self.encode_output(
+                pm,
+                ReadFileResp(
+                    status=404,
+                    content_type=None,
+                    content_encoding=None,
+                    body=None,
+                    error="Path not found",
+                ),
+            )
+
+        repo, rel_path = decon
+
+        fm = file_repo.get_by_path(repo.id, rel_path)
+        if not fm:
+            return self.encode_output(
+                pm,
+                ReadFileResp(
+                    status=404,
+                    content_type=None,
+                    content_encoding=None,
+                    body=None,
+                    error="File not indexed",
+                ),
+            )
+
+        abs_path = os.path.join(repo.root_path, rel_path)
+        try:
+            with open(abs_path, "rb") as f:
+                data = f.read()
+        except OSError as e:
+            return self.encode_output(
+                pm,
+                ReadFileResp(
+                    status=500,
+                    content_type=None,
+                    content_encoding=None,
+                    body=None,
+                    error=f"Failed to read file: {e}",
+                ),
+            )
+
+        # Determine MIME type
+        mime, _ = mimetypes.guess_type(rel_path)
+        if not mime:
+            mime = "application/octet-stream"
+
+        # Try to return text if valid UTF-8
+        try:
+            text = data.decode("utf-8")
+            # Prefer a text/* content-type; if generic octet-stream but actually text, override
+            if mime == "application/octet-stream":
+                mime = "text/plain; charset=utf-8"
+            elif "charset=" not in mime and mime.startswith("text/"):
+                mime = f"{mime}; charset=utf-8"
+            return self.encode_output(
+                pm,
+                ReadFileResp(
+                    status=200,
+                    content_type=mime,
+                    content_encoding=None,  # omit for identity
+                    body=text,
+                    error=None,
+                ),
+            )
+        except UnicodeDecodeError:
+            # Binary; return base64
+            b64 = base64.b64encode(data).decode("ascii")
+            return self.encode_output(
+                pm,
+                ReadFileResp(
+                    status=200,
+                    content_type=mime,
+                    content_encoding="base64",
+                    body=b64,
+                    error=None,
+                ),
+            )
+
+    def encode_output(self, pm: ProjectManager, obj: ReadFileResp) -> str:
+        fmt = self.get_output_format(pm)
+        if fmt == ToolOutput.JSON:
+            return json.dumps(
+                obj.model_dump(by_alias=True, exclude_none=True),
+                ensure_ascii=False,
+            )
+
+        # Text mode: render headers then body
+        def _reason(code: int) -> str:
+            return {
+                200: "OK",
+                400: "Bad Request",
+                404: "Not Found",
+                500: "Internal Server Error",
+            }.get(code, "Unknown")
+
+        status = int(obj.status)
+        reason = _reason(status)
+        ct = obj.content_type
+        ce = obj.content_encoding
+        body = obj.body
+        err = obj.error
+
+        lines = [f"Status: {status} {reason}"]
+        if ct:
+            lines.append(f"Content-Type: {ct}")
+        if ce:
+            lines.append(f"Content-Encoding: {ce}")
+        lines.append("")  # blank line between headers and body
+
+        if body is not None:
+            lines.append(body)
+        elif err:
+            lines.append(f"Error: {err}")
+
+        return "\n".join(lines)
