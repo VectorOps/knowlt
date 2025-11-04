@@ -21,6 +21,7 @@ from pypika import (
     Case,
 )
 from pypika.terms import LiteralValue, ValueWrapper
+from pypika.terms import LiteralValue, ValueWrapper, Criterion, Term
 
 from pydantic import BaseModel
 
@@ -57,6 +58,17 @@ INSERT_MIGRATION_SQL = "INSERT INTO __migrations__(name, applied_at) VALUES (?, 
 MatchBM25Fn = CustomFunction("fts_main_nodes.match_bm25", ["id", "query"])
 ArrayCosineSimilarityFn = CustomFunction("array_cosine_similarity", ["vec", "param"])
 RegexpFullMatch = CustomFunction("regexp_full_match", ["s", "pat"])
+
+class Glob(Criterion):
+    def __init__(self, left: Term, right: Term):
+        super().__init__()
+        self.left = left
+        self.right = right
+
+    def get_sql(self, **kwargs) -> str:
+        l = self.left.get_sql(**kwargs)
+        r = self.right.get_sql(**kwargs)
+        return f"{l} GLOB {r}"
 
 
 # Helpers
@@ -525,6 +537,37 @@ class DuckDBFileRepo(_DuckDBBaseRepo[File], data.AbstractFileRepository):
             q = q.where(self._table.repo_id.isin(flt.repo_ids))
         if flt.package_id:
             q = q.where(self._table.package_id == flt.package_id)
+
+        rows = await self._execute(q)
+        return [self.model(**self._deserialize_data(r)) for r in rows]
+
+    async def glob_search(
+        self,
+        repo_ids: Optional[List[ModelId]],
+        patterns: List[str],
+    ) -> List[File]:
+        """
+        Search files using DuckDB's GLOB operator against files.path.
+        Multiple patterns are OR-joined. Optionally restrict by repo_ids.
+        """
+        if not patterns:
+            return []
+        if repo_ids is not None and len(repo_ids) == 0:
+            return []
+
+        # Start query
+        q = Query.from_(self._table).select(self._table.star)
+
+        # Optional repo filter
+        if repo_ids is not None:
+            q = q.where(self._table.repo_id.isin(repo_ids))
+
+        # Build OR of GLOB criteria for all patterns
+        pattern_criteria = [Glob(self._table.path, ValueWrapper(p)) for p in patterns]
+        or_cond = pattern_criteria[0]
+        for crit in pattern_criteria[1:]:
+            or_cond = or_cond | crit
+        q = q.where(or_cond).orderby(self._table.path)
 
         rows = await self._execute(q)
         return [self.model(**self._deserialize_data(r)) for r in rows]
