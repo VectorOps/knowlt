@@ -1,14 +1,13 @@
-import fnmatch
 import json
 from typing import Sequence, Any
 
 from pydantic import BaseModel, Field
 
 from knowlt.project import ProjectManager, VIRTUAL_PATH_PREFIX
-from knowlt.data import FileFilter
 from .base import BaseTool
 
 
+# TODO: Result limit
 class ListFilesReq(BaseModel):
     """Request model for listing files."""
 
@@ -45,20 +44,16 @@ class ListFilesTool(BaseTool):
 
         file_repo = pm.data.file
 
-        # TODO: Better search
-        all_files = await file_repo.get_list(FileFilter(repo_ids=pm.repo_ids))
-
         pats = list(req_obj.patterns) if req_obj.patterns else []
         if not pats:
             return self.encode_output(pm, [])
 
-        def _matches(path: str) -> bool:
-            return any(fnmatch.fnmatch(path, pat) for pat in pats)
+        matches = await file_repo.glob_search(pm.repo_ids, pats)
 
         items = [
             FileListItem(path=vpath)
-            for fm in all_files
-            if _matches(vpath := pm.construct_virtual_path(fm.repo_id, fm.path))
+            for fm in matches
+            for vpath in [pm.construct_virtual_path(fm.repo_id, fm.path)]
         ]
         return self.encode_output(pm, items)
 
