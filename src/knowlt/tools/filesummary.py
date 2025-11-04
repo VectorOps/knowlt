@@ -1,9 +1,9 @@
 from typing import Sequence, Any
-from .base import BaseTool, MCPToolDefinition
+from .base import BaseTool
 from pydantic import BaseModel
 import json
 
-from knowlt.file_summary import FileSummary, SummaryMode, build_file_summary
+from knowlt.summary import FileSummary, SummaryMode, build_file_summary
 
 from knowlt.settings import ToolOutput
 from knowlt.project import ProjectManager

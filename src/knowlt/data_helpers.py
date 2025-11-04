@@ -1,7 +1,7 @@
-from typing import List
+from typing import List, Dict
 
-from knowlt.data import AbstractNodeRepository, NodeFilter
-from knowlt.models import ModelId, Node, NodeKind
+from knowlt.data import AbstractNodeRepository, NodeFilter, AbstractPackageRepository
+from knowlt.models import ModelId, Node, NodeKind, File, Package
 
 
 # Helpers
@@ -128,3 +128,28 @@ async def post_process_search_results(
     final_results = await include_direct_descendants(repo, final_results)
 
     return final_results
+
+
+# Files/Packages helpers
+async def populate_packages_for_files(
+    package_repo: AbstractPackageRepository, files: List[File]
+) -> Dict[ModelId, Package]:
+    """
+    Populate the `package` attribute on each File in-place by batch-loading
+    referenced packages. Returns a map of package_id -> Package for reuse.
+    """
+    if not files:
+        return {}
+
+    pkg_ids = {f.package_id for f in files if getattr(f, "package_id", None)}
+    if not pkg_ids:
+        return {}
+
+    packages = await package_repo.get_by_ids(list(pkg_ids))
+    package_by_id: Dict[ModelId, Package] = {p.id: p for p in packages}
+
+    for f in files:
+        if f.package_id and f.package_id in package_by_id:
+            f.package = package_by_id[f.package_id]
+
+    return package_by_id
