@@ -79,7 +79,8 @@ class ReadFilesTool(BaseTool):
 
         repo, rel_path = decon
 
-        fm = file_repo.get_by_path(repo.id, rel_path)
+        # Use repository API to check if the file is indexed
+        fm = await file_repo.get_by_paths(repo.id, [rel_path])
         if not fm:
             return self.encode_output(
                 pm,
@@ -182,3 +183,31 @@ class ReadFilesTool(BaseTool):
             lines.append(f"Error: {err}")
 
         return "\n".join(lines)
+
+    def get_openai_schema(self) -> dict:
+        """Return the OpenAI schema for this tool."""
+        return {
+            "name": self.tool_name,
+            "description": (
+                "Read and return the full contents of the specified project file as an HTTP-like response. "
+                "Path may be plain (default repo) or virtual and prefixed with "
+                f"'{VIRTUAL_PATH_PREFIX}/<repo_name>'. "
+                "Response fields: status, content-type, content-encoding, and body (the file). "
+                "Interpretation: read the header lines (Status, Content-Type, Content-Encoding) followed by a blank line "
+                "and then the body. If content-encoding is 'base64', the body is base64-encoded; if omitted, the body is plain text. "
+                "On errors, status is a non-200 code and an 'error' message explains the failure."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": (
+                            "File path to read. Supports virtual paths "
+                            f"using '{VIRTUAL_PATH_PREFIX}/<repo_name>/...'"
+                        ),
+                    }
+                },
+                "required": ["path"],
+            },
+        }
