@@ -6,8 +6,9 @@ from pydantic import BaseModel, Field
 from knowlt.data import NodeSearchQuery
 from knowlt.models import NodeKind, Visibility
 from knowlt.project import ProjectManager, VIRTUAL_PATH_PREFIX
-from .base import BaseTool, MCPToolDefinition
-from knowlt.file_summary import SummaryMode
+from .base import BaseTool
+from knowlt.summary import SummaryMode
+from knowlt.data_helpers import populate_packages_for_files
 from knowlt.parsers import (
     CodeParserRegistry,
     AbstractCodeParser,
@@ -15,7 +16,6 @@ from knowlt.parsers import (
 )
 from knowlt.models import File
 from knowlt.settings import ToolOutput
-from knowlt.data_helpers import post_process_search_results
 
 
 class NodeSearchReq(BaseModel):
@@ -116,9 +116,8 @@ class NodeSearchTool(BaseTool):
 
         query = NodeSearchQuery(
             repo_ids=repo_ids,
-            symbol_name=req.symbol_name,
             visibility=vis,
-            doc_needle=req.query,
+            needle=req.query,
             embedding_query=embedding_vec,
             boost_repo_id=pm.default_repo.id,
             repo_boost_factor=pm.settings.search.default_repo_boost,
@@ -127,25 +126,28 @@ class NodeSearchTool(BaseTool):
         )
 
         nodes = await pm.data.node.search(query)
-        nodes = await post_process_search_results(pm.data.node, nodes, final_limit)
 
         file_repo = pm.data.file
+        package_repo = pm.data.package
+
+        # Batch load files for all nodes, then batch load packages referenced by those files.
+        file_ids = [s.file_id for s in nodes if getattr(s, "file_id", None)]
+        files: list[File] = await file_repo.get_by_ids(list(set(file_ids))) if file_ids else []
+        file_by_id = {f.id: f for f in files}
+        if files:
+            await populate_packages_for_files(package_repo, files)
 
         results: list[NodeSearchResult] = []
         for s in nodes:
             helper: Optional[AbstractLanguageHelper] = None
-
-            # TODO: Optimize to dedupe and get a list of files by ids
             fm: Optional[File] = None
             file_path = None
-            if s.file_id:
-                fm = await file_repo.get_by_id(s.file_id)
-                file_path = (
-                    pm.construct_virtual_path(s.repo_id, fm.path) if fm else None
-                )
-
-                if fm and fm.language:
-                    helper = CodeParserRegistry.get_helper(fm.language)
+            if s.file_id and s.file_id in file_by_id:
+                fm = file_by_id[s.file_id]
+                file_path = pm.construct_virtual_path(s.repo_id, fm.path)
+                # get language from package if available
+                if fm.package and getattr(fm.package, "language", None):
+                    helper = CodeParserRegistry.get_helper(fm.package.language)
 
             sym_body: Optional[str] = None
             if summary_mode != SummaryMode.Skip:
@@ -154,7 +156,7 @@ class NodeSearchTool(BaseTool):
                 elif helper is not None:
                     include_docs = summary_mode == SummaryMode.Documentation
                     include_comments = summary_mode == SummaryMode.Documentation
-                    sym_body = helper.get_symbol_summary(
+                    sym_body = helper.get_node_summary(
                         s,
                         include_comments=include_comments,
                         include_docs=include_docs,
@@ -163,9 +165,8 @@ class NodeSearchTool(BaseTool):
 
             results.append(
                 NodeSearchResult(
-                    name=s.name,
-                    kind=s.kind,
-                    visibility=s.visibility,
+                    # visibility is not tracked on Node model; omit or set None
+                    visibility=None,
                     file_path=file_path,
                     body=sym_body,
                 )
