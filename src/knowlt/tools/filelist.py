@@ -1,11 +1,10 @@
 import fnmatch
 import json
-from typing import Sequence, Optional, Any
+from typing import Sequence, Any
 
 from pydantic import BaseModel, Field
 
 from knowlt.project import ProjectManager, VIRTUAL_PATH_PREFIX
-from knowlt.models import ProgrammingLanguage
 from knowlt.data import FileFilter
 from .base import BaseTool
 
@@ -57,7 +56,7 @@ class ListFilesTool(BaseTool):
             return any(fnmatch.fnmatch(path, pat) for pat in pats)
 
         items = [
-            FileListItem(path=vpath, language=fm.language)
+            FileListItem(path=vpath)
             for fm in all_files
             if _matches(vpath := pm.construct_virtual_path(fm.repo_id, fm.path))
         ]
