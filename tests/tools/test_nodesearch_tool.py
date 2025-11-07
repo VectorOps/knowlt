@@ -53,7 +53,7 @@ async def test_execute_nodesearch_skip_mode_returns_list():
     pm, _repo = await _make_pm()
     try:
         # Force tool output to JSON for stable assertions
-        pm.settings.tools.outputs["vectorops_search"] = ToolOutput.JSON
+        pm.settings.tools.outputs["search_symbols"] = ToolOutput.JSON
 
         tool = NodeSearchTool()
         out = await tool.execute(
