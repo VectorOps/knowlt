@@ -59,6 +59,7 @@ MatchBM25Fn = CustomFunction("fts_main_nodes.match_bm25", ["id", "query"])
 ArrayCosineSimilarityFn = CustomFunction("array_cosine_similarity", ["vec", "param"])
 RegexpFullMatch = CustomFunction("regexp_full_match", ["s", "pat"])
 
+
 class Glob(Criterion):
     def __init__(self, left: Term, right: Term):
         super().__init__()

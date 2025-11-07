@@ -58,4 +58,4 @@ where = ["src"]
 include = ["knowlt*"]
 
 [tool.setuptools.package-data]
-know = ["migrations/**/*.sql"]
+knowlt = ["migrations/**/*.sql"]
