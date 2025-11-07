@@ -175,7 +175,7 @@ class NodeSearchTool(BaseTool):
             )
         return self.encode_output(pm, results)
 
-    def get_openai_schema(self) -> dict:
+    async def get_openai_schema(self) -> dict:
         visibility_enum = [v.value for v in Visibility] + ["all"]
         summary_enum = [m.value for m in SummaryMode]
 
