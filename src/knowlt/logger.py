@@ -18,9 +18,4 @@ structlog.configure(
     ],
 )
 
-# Ensure the stdlib logger named "knowlt" inherits the root logger configuration.
-_std_logger = logging.getLogger("knowlt")
-_std_logger.setLevel(logging.NOTSET)
-_std_logger.propagate = True
-
 logger: structlog.BoundLogger = structlog.get_logger("knowlt")
