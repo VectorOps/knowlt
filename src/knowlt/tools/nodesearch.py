@@ -63,7 +63,7 @@ class NodeSearchResult(BaseModel):
 
 
 class NodeSearchTool(BaseTool):
-    tool_name = "search_symbols"
+    tool_name = "search"
     tool_input = NodeSearchReq
     default_output = ToolOutput.STRUCTURED_TEXT
 
