@@ -63,7 +63,7 @@ class NodeSearchResult(BaseModel):
 
 
 class NodeSearchTool(BaseTool):
-    tool_name = "vectorops_search"
+    tool_name = "search_symbols"
     tool_input = NodeSearchReq
     default_output = ToolOutput.STRUCTURED_TEXT
 
@@ -132,7 +132,9 @@ class NodeSearchTool(BaseTool):
 
         # Batch load files for all nodes, then batch load packages referenced by those files.
         file_ids = [s.file_id for s in nodes if getattr(s, "file_id", None)]
-        files: list[File] = await file_repo.get_by_ids(list(set(file_ids))) if file_ids else []
+        files: list[File] = (
+            await file_repo.get_by_ids(list(set(file_ids))) if file_ids else []
+        )
         file_by_id = {f.id: f for f in files}
         if files:
             await populate_packages_for_files(package_repo, files)
