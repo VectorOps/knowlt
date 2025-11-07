@@ -62,7 +62,7 @@ class SummarizeFilesTool(BaseTool):
 
         return self.encode_output(pm, summaries)
 
-    def get_openai_schema(self) -> dict:
+    async def get_openai_schema(self) -> dict:
         """Return the OpenAI schema for the tool."""
         summary_enum = [m.value for m in SummaryMode]
 

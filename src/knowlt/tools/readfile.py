@@ -184,7 +184,7 @@ class ReadFilesTool(BaseTool):
 
         return "\n".join(lines)
 
-    def get_openai_schema(self) -> dict:
+    async def get_openai_schema(self) -> dict:
         """Return the OpenAI schema for this tool."""
         return {
             "name": self.tool_name,
