@@ -47,16 +47,15 @@ async def build_file_summary(
     if not fm:
         logger.warning("File not found in repository – skipped.", path=rel_path)
         return None
-
-    pkgs = await pm.data.package.get_by_ids([fm.package_id])
-    if not pkgs:
-        logger.warning("Package not found in repository – skipped.", path=rel_path)
-        return None
-    pkg = pkgs[0]
+    # Retrieve package if available
+    pkg = None
+    if fm.package_id:
+        pkgs = await pm.data.package.get_by_ids([fm.package_id])
+        pkg = pkgs[0] if pkgs else None
 
     # If there is no language or package, we can't generate a summary,
     # so we return the full file content instead.
-    if (summary_mode is SummaryMode.Source) or (pkg.language is None):
+    if (summary_mode is SummaryMode.Source) or (pkg is None) or (pkg.language is None):
         abs_path = os.path.join(repo.root_path, rel_path)
         try:
             with open(abs_path, "r", encoding="utf-8") as f:

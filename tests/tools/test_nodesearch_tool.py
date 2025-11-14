@@ -33,7 +33,7 @@ async def _make_pm():
 @pytest.mark.asyncio
 async def test_schema_includes_supported_modes_and_defaults():
     tool = NodeSearchTool()
-    schema = tool.get_openai_schema()
+    schema = await tool.get_openai_schema()
     enum_vals = schema["parameters"]["properties"]["summary_mode"]["enum"]
     # Node search supports all SummaryMode options (including 'source' and 'skip')
     assert "source" in enum_vals

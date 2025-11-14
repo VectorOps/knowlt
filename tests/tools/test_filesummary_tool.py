@@ -34,7 +34,7 @@ async def _make_pm():
 @pytest.mark.asyncio
 async def test_schema_excludes_unsupported_modes():
     tool = SummarizeFilesTool()
-    schema = tool.get_openai_schema()
+    schema = await tool.get_openai_schema()
     enum_vals = schema["parameters"]["properties"]["summary_mode"]["enum"]
     # 'source' and 'skip' are not supported by the tool schema
     assert "source" not in enum_vals
