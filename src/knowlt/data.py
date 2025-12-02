@@ -103,6 +103,10 @@ class AbstractPackageRepository(AbstractCRUDRepository[Package]):
     async def delete_orphaned(self) -> None:
         pass
 
+    @abstractmethod
+    async def delete_by_repo_id(self, repo_id: ModelId) -> None:
+        pass
+
 
 @dataclass
 class FileFilter:
@@ -152,6 +156,10 @@ class AbstractFileRepository(AbstractCRUDRepository[File]):
         glob patterns, optionally restricted to the specified repos.
         """
 
+    @abstractmethod
+    async def delete_by_repo_id(self, repo_id: ModelId) -> None:
+        pass
+
 
 # Nodes
 @dataclass
@@ -196,6 +204,10 @@ class AbstractNodeRepository(AbstractCRUDRepository[Node]):
         pass
 
     @abstractmethod
+    async def delete_by_repo_id(self, repo_id: ModelId) -> None:
+        pass
+
+    @abstractmethod
     async def get_list(self, flt: NodeFilter) -> List[Node]:
         pass
 
@@ -214,6 +226,10 @@ class ImportEdgeFilter:
 class AbstractImportEdgeRepository(AbstractCRUDRepository[ImportEdge]):
     @abstractmethod
     async def get_list(self, flt: ImportEdgeFilter) -> List[ImportEdge]:
+        pass
+
+    @abstractmethod
+    async def delete_by_repo_id(self, repo_id: ModelId) -> None:
         pass
 
 
