@@ -356,6 +356,12 @@ class DuckDBProjectRepoRepo(data.AbstractProjectRepoRepository):
             # This can happen if the repo is already associated with the project,
             # which is fine.
             pass
+    async def delete_by_repo_id(self, repo_id: ModelId) -> None:
+        """
+        Remove all project-repo mapping rows for the given repo_id.
+        """
+        q = Query.from_(self._table).where(self._table.repo_id == repo_id).delete()
+        await self._execute(q)
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +396,7 @@ class DuckDBRepoRepo(_DuckDBBaseRepo[Repo], data.AbstractRepoRepository):
 
         for rid in item_ids:
             # Order does not matter much; use explicit repo_id-based deletes.
+            await self.data_repo.project_repo.delete_by_repo_id(rid)
             await self.data_repo.importedge.delete_by_repo_id(rid)
             await self.data_repo.node.delete_by_repo_id(rid)
             await self.data_repo.file.delete_by_repo_id(rid)

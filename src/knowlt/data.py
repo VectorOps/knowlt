@@ -52,6 +52,10 @@ class AbstractProjectRepoRepository(ABC):
     @abstractmethod
     async def add_repo_id(self, project_id, repo_id):
         pass
+    @abstractmethod
+    async def delete_by_repo_id(self, repo_id: ModelId) -> None:
+        """Delete all project-repo mappings for the given repo_id."""
+        pass
 
 
 @dataclass
