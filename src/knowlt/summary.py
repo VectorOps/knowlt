@@ -45,7 +45,7 @@ async def build_file_summary(
     files = await pm.data.file.get_by_paths(repo.id, [rel_path])
     fm = files[0] if files else None
     if not fm:
-        logger.warning("File not found in repository – skipped.", path=rel_path)
+        logger.debug("File not found in repository – skipped.", path=rel_path)
         return None
     # Retrieve package if available
     pkg = None

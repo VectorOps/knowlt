@@ -57,6 +57,149 @@ async def test_repo_metadata_repository(data_repo):
 
 
 @pytest.mark.asyncio
+async def test_repo_delete_cascades_by_repo_id(data_repo):
+    repo_repo = data_repo.repo
+    pkg_repo = data_repo.package
+    file_repo = data_repo.file
+    node_repo = data_repo.node
+    edge_repo = data_repo.importedge
+
+    # two repos: rid1 will be deleted, rid2 is control
+    rid1, rid2 = make_id(), make_id()
+    await repo_repo.create(
+        [
+            Repo(id=rid1, name="r1", root_path="/tmp/r1"),
+            Repo(id=rid2, name="r2", root_path="/tmp/r2"),
+        ]
+    )
+
+    # objects for rid1
+    pkg1_id = make_id()
+    file1_id = make_id()
+    node1_id = make_id()
+    edge1_id = make_id()
+
+    await pkg_repo.create(
+        [
+            Package(
+                id=pkg1_id,
+                name="pkg1",
+                virtual_path="pkg1",
+                physical_path="pkg1.py",
+                repo_id=rid1,
+            )
+        ]
+    )
+    await file_repo.create(
+        [File(id=file1_id, repo_id=rid1, package_id=pkg1_id, path="src/pkg1/file.py")]
+    )
+    await node_repo.create(
+        [
+            Node(
+                id=node1_id,
+                name="sym1",
+                repo_id=rid1,
+                file_id=file1_id,
+                package_id=pkg1_id,
+                body="def sym1(): pass",
+            )
+        ]
+    )
+    await edge_repo.create(
+        [
+            ImportEdge(
+                id=edge1_id,
+                repo_id=rid1,
+                from_package_id=pkg1_id,
+                from_file_id=file1_id,
+                to_package_physical_path="pkg/other",
+                to_package_virtual_path="pkg/other",
+                raw="import pkg.other",
+                external=False,
+            )
+        ]
+    )
+
+    # objects for rid2 (should survive)
+    pkg2_id = make_id()
+    file2_id = make_id()
+    node2_id = make_id()
+    edge2_id = make_id()
+
+    await pkg_repo.create(
+        [
+            Package(
+                id=pkg2_id,
+                name="pkg2",
+                virtual_path="pkg2",
+                physical_path="pkg2.py",
+                repo_id=rid2,
+            )
+        ]
+    )
+    await file_repo.create(
+        [File(id=file2_id, repo_id=rid2, package_id=pkg2_id, path="src/pkg2/file.py")]
+    )
+    await node_repo.create(
+        [
+            Node(
+                id=node2_id,
+                name="sym2",
+                repo_id=rid2,
+                file_id=file2_id,
+                package_id=pkg2_id,
+                body="def sym2(): pass",
+            )
+        ]
+    )
+    await edge_repo.create(
+        [
+            ImportEdge(
+                id=edge2_id,
+                repo_id=rid2,
+                from_package_id=pkg2_id,
+                from_file_id=file2_id,
+                to_package_physical_path="pkg/other2",
+                to_package_virtual_path="pkg/other2",
+                raw="import pkg.other2",
+                external=False,
+            )
+        ]
+    )
+
+    # sanity: data exists for both repos
+    assert await pkg_repo.get_list(PackageFilter(repo_ids=[rid1]))
+    assert await file_repo.get_list(FileFilter(repo_ids=[rid1]))
+    assert await node_repo.get_list(NodeFilter(repo_ids=[rid1]))
+    assert await edge_repo.get_list(ImportEdgeFilter(repo_ids=[rid1]))
+
+    assert await pkg_repo.get_list(PackageFilter(repo_ids=[rid2]))
+    assert await file_repo.get_list(FileFilter(repo_ids=[rid2]))
+    assert await node_repo.get_list(NodeFilter(repo_ids=[rid2]))
+    assert await edge_repo.get_list(ImportEdgeFilter(repo_ids=[rid2]))
+
+    # delete rid1 and ensure cascade
+    assert await repo_repo.delete([rid1]) is True
+
+    # rid1 repo and all its data gone
+    assert await repo_repo.get_by_ids([rid1]) == []
+    assert await pkg_repo.get_list(PackageFilter(repo_ids=[rid1])) == []
+    assert await file_repo.get_list(FileFilter(repo_ids=[rid1])) == []
+    assert await node_repo.get_list(NodeFilter(repo_ids=[rid1])) == []
+    assert await edge_repo.get_list(ImportEdgeFilter(repo_ids=[rid1])) == []
+
+    # file search index for rid1 should also be empty
+    assert await file_repo.filename_complete("file", repo_ids=[rid1]) == []
+
+    # rid2 data still present
+    assert await repo_repo.get_by_ids([rid2]) != []
+    assert await pkg_repo.get_list(PackageFilter(repo_ids=[rid2])) != []
+    assert await file_repo.get_list(FileFilter(repo_ids=[rid2])) != []
+    assert await node_repo.get_list(NodeFilter(repo_ids=[rid2])) != []
+    assert await edge_repo.get_list(ImportEdgeFilter(repo_ids=[rid2])) != []
+
+
+@pytest.mark.asyncio
 async def test_package_metadata_repository(data_repo):
     pkg_repo, file_repo = data_repo.package, data_repo.file
 

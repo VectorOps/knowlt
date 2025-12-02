@@ -237,9 +237,14 @@ class DuckDBThreadWrapper(BaseQueueWorker):
 class _DuckDBBaseRepo(BaseSQLRepository[T]):
     table: str
 
-    def __init__(self, conn: DuckDBThreadWrapper):
+    def __init__(self, conn: DuckDBThreadWrapper, data_repo: "DuckDBDataRepository"):
         self.conn = conn
+        self._data_repo = data_repo
         self._table = Table(self.table)
+
+    @property
+    def data_repo(self) -> "DuckDBDataRepository":
+        return self._data_repo
 
     def _get_query(self, q):
         parameter = QmarkParameter()
@@ -257,7 +262,6 @@ class _DuckDBBaseRepo(BaseSQLRepository[T]):
         q = Query.from_(self._table).select("*").where(self._table.id.isin(item_ids))
         rows = await self._execute(q)
         return [self.model(**self._deserialize_data(r)) for r in rows]
-
     async def create(self, items: list[T]) -> list[T]:
         if not items:
             return []
@@ -376,6 +380,23 @@ class DuckDBRepoRepo(_DuckDBBaseRepo[Repo], data.AbstractRepoRepository):
         rows = await self._execute(q)
         return self.model(**self._deserialize_data(rows[0])) if rows else None
 
+
+    async def delete(self, item_ids: list[ModelId]) -> bool:
+        """
+        Delete repos and cascade by repo_id into dependent tables.
+        """
+        if not item_ids:
+            return True
+
+        for rid in item_ids:
+            # Order does not matter much; use explicit repo_id-based deletes.
+            await self.data_repo.importedge.delete_by_repo_id(rid)
+            await self.data_repo.node.delete_by_repo_id(rid)
+            await self.data_repo.file.delete_by_repo_id(rid)
+            await self.data_repo.package.delete_by_repo_id(rid)
+
+        return await super().delete(item_ids)
+
     async def get_list(self, flt: data.RepoFilter) -> list[Repo]:
         q = Query.from_(self._table).select(self._table.star)
         if flt.project_id:
@@ -395,9 +416,8 @@ class DuckDBPackageRepo(_DuckDBBaseRepo[Package], data.AbstractPackageRepository
     table = "packages"
     model = Package
 
-    def __init__(self, conn: "DuckDBThreadWrapper", file_repo: "DuckDBFileRepo"):  # type: ignore
-        super().__init__(conn)
-        self._file_repo = file_repo
+    def __init__(self, conn: "DuckDBThreadWrapper", data_repo: "DuckDBDataRepository"):
+        super().__init__(conn, data_repo)
 
     async def get_by_physical_paths(
         self, repo_id: ModelId, root_paths: List[str]
@@ -446,6 +466,10 @@ class DuckDBPackageRepo(_DuckDBBaseRepo[Package], data.AbstractPackageRepository
         )
 
         q = Query.from_(self._table).where(self._table.id.notin(subq)).delete()
+        await self._execute(q)
+
+    async def delete_by_repo_id(self, repo_id: ModelId) -> None:
+        q = Query.from_(self._table).where(self._table.repo_id == repo_id).delete()
         await self._execute(q)
 
 
@@ -521,6 +545,20 @@ class DuckDBFileRepo(_DuckDBBaseRepo[File], data.AbstractFileRepository):
     async def delete(self, item_ids: List[ModelId]) -> bool:
         await self._delete_index_for_ids(item_ids)
         return await super().delete(item_ids)
+
+    async def delete_by_repo_id(self, repo_id: ModelId) -> None:
+        # collect file IDs for this repo to keep search index in sync
+        q = (
+            Query.from_(self._table)
+            .select(self._table.id)
+            .where(self._table.repo_id == repo_id)
+        )
+        rows = await self._execute(q)
+        file_ids = [r["id"] for r in rows]
+        if not file_ids:
+            return
+        await self._delete_index_for_ids(file_ids)
+        await super().delete(file_ids)
 
     async def get_by_paths(self, repo_id: ModelId, paths: List[str]) -> Optional[File]:
         q = (
@@ -653,12 +691,12 @@ class DuckDBNodeRepo(_DuckDBBaseRepo[Node], data.AbstractNodeRepository):
     def __init__(
         self,
         conn: "DuckDBThreadWrapper",
-        file_repo: "DuckDBFileRepo",
-        settings: ProjectSettings,
+        data_repo: "DuckDBDataRepository",
     ):
-        super().__init__(conn)
-        self.file_repo = file_repo
-        self._settings = settings
+        super().__init__(conn, data_repo)
+        # use the data repository to access dependencies
+        self.file_repo = data_repo.file
+        self._settings = data_repo.settings
 
     async def create(self, items: List[Node]) -> List[Node]:
         if not items:
@@ -912,6 +950,10 @@ class DuckDBNodeRepo(_DuckDBBaseRepo[Node], data.AbstractNodeRepository):
         q = Query.from_(self._table).where(self._table.file_id.isin(file_ids)).delete()
         await self._execute(q)
 
+    async def delete_by_repo_id(self, repo_id: ModelId) -> None:
+        q = Query.from_(self._table).where(self._table.repo_id == repo_id).delete()
+        await self._execute(q)
+
     async def get_list(self, flt: data.NodeFilter) -> List[Node]:
         q = Query.from_(self._table).select("*")
 
@@ -960,6 +1002,10 @@ class DuckDBImportEdgeRepo(
         rows = await self._execute(q)
         return [self.model(**self._deserialize_data(r)) for r in rows]
 
+    async def delete_by_repo_id(self, repo_id: ModelId) -> None:
+        q = Query.from_(self._table).where(self._table.repo_id == repo_id).delete()
+        await self._execute(q)
+
 
 # Data-repository
 class DuckDBDataRepository(data.AbstractDataRepository):
@@ -987,13 +1033,13 @@ class DuckDBDataRepository(data.AbstractDataRepository):
         self._settings = settings
 
         # build repositories
-        self._project_repo = DuckDBProjectRepo(self._conn)
+        self._project_repo = DuckDBProjectRepo(self._conn, self)
         self._prj_repo_repo = DuckDBProjectRepoRepo(self._conn)
-        self._file_repo = DuckDBFileRepo(self._conn)
-        self._package_repo = DuckDBPackageRepo(self._conn, self._file_repo)
-        self._repo_repo = DuckDBRepoRepo(self._conn)
-        self._node_repo = DuckDBNodeRepo(self._conn, self._file_repo, self._settings)
-        self._edge_repo = DuckDBImportEdgeRepo(self._conn)
+        self._file_repo = DuckDBFileRepo(self._conn, self)
+        self._package_repo = DuckDBPackageRepo(self._conn, self)
+        self._repo_repo = DuckDBRepoRepo(self._conn, self)
+        self._node_repo = DuckDBNodeRepo(self._conn, self)
+        self._edge_repo = DuckDBImportEdgeRepo(self._conn, self)
 
     def close(self):
         self._conn.close()

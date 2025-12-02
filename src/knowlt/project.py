@@ -98,7 +98,12 @@ class ProjectManager:
             raise ValueError(f"settings.repo_name is required.")
 
     @classmethod
-    async def create(self, settings: ProjectSettings, data: AbstractDataRepository, embeddings: Optional[EmbeddingWorker] = None):
+    async def create(
+        self,
+        settings: ProjectSettings,
+        data: AbstractDataRepository,
+        embeddings: Optional[EmbeddingWorker] = None,
+    ):
         p = ProjectManager(settings=settings, data=data, embeddings=embeddings)
         await p._init_project()
         return p
@@ -186,7 +191,9 @@ class ProjectManager:
             self._repos_by_name.pop(repo.name, None)
 
         # Data-layer removal may not be supported by the abstract interface
-        remover = getattr(getattr(self.data, "project_repo", None), "remove_repo_id", None)
+        remover = getattr(
+            getattr(self.data, "project_repo", None), "remove_repo_id", None
+        )
         if callable(remover):
             try:
                 await remover(self.project.id, repo_id)
@@ -299,10 +306,10 @@ class ProjectManager:
                     return
 
         if self.settings.refresh.refresh_all_repos:
-            logger.info("Auto-refreshing all associated repositories...")
+            logger.debug("Auto-refreshing all associated repositories...")
             await self.refresh_all()
         else:
-            logger.info("Auto-refreshing primary repository...")
+            logger.debug("Auto-refreshing primary repository...")
             await self.refresh()  # Just refreshes default repo
 
     async def refresh_components(self, scan_result: ScanResult):
