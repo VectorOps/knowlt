@@ -6,7 +6,9 @@ import json
 from knowlt.summary import FileSummary, SummaryMode, build_file_summary
 
 from knowlt.settings import ToolOutput
-from knowlt.project import ProjectManager
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from knowlt.project import ProjectManager
 from knowlt.models import Visibility
 
 
@@ -14,7 +16,7 @@ class SummarizeFilesReq(BaseModel):
     """Request model for the SummarizeFilesTool."""
 
     paths: Sequence[str]
-    summary_mode: SummaryMode | str = SummaryMode.Definition
+    summary_mode: SummaryMode | str = SummaryMode.Documentation
 
 
 class SummarizeFilesTool(BaseTool):
@@ -26,13 +28,12 @@ class SummarizeFilesTool(BaseTool):
 
     async def execute(
         self,
-        pm: ProjectManager,
         req: Any,
     ) -> str:
         """Generate summaries for the requested files."""
         req_obj = self.parse_input(req)
 
-        await pm.maybe_refresh()
+        await self.pm.maybe_refresh()
 
         summary_mode = req_obj.summary_mode
         if isinstance(summary_mode, str):
@@ -45,22 +46,24 @@ class SummarizeFilesTool(BaseTool):
 
         summaries: list[FileSummary] = []
         for path in req_obj.paths:
-            deconstructed = pm.deconstruct_virtual_path(path)
+            deconstructed = self.pm.deconstruct_virtual_path(path)
             if not deconstructed:
                 continue
 
             repo, rel_path = deconstructed
-            fs = await build_file_summary(pm, repo, rel_path, summary_mode=summary_mode)
+            fs = await build_file_summary(
+                self.pm, repo, rel_path, summary_mode=summary_mode
+            )
             if fs:
                 fs.path = path
                 summaries.append(fs)
 
         # Ensure default output is STRUCTURED_TEXT if not explicitly set
-        outputs = pm.settings.tools.outputs
+        outputs = self.pm.settings.tools.outputs
         if self.tool_name not in outputs:
             outputs[self.tool_name] = ToolOutput.STRUCTURED_TEXT
 
-        return self.encode_output(pm, summaries)
+        return self.encode_output(summaries)
 
     async def get_openai_schema(self) -> dict:
         """Return the OpenAI schema for the tool."""
@@ -91,11 +94,8 @@ class SummarizeFilesTool(BaseTool):
                     "summary_mode": {
                         "type": "string",
                         "enum": summary_enum,
+                        "description": "Amount of source code to include with each match.",
                         "default": SummaryMode.Definition.value,
-                        "description": (
-                            "Level of detail for the generated summary "
-                            "(`definition`, `documentation`). "
-                        ),
                     },
                 },
                 "required": ["paths"],

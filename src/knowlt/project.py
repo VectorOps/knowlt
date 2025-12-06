@@ -1,8 +1,9 @@
+from knowlt.consts import VIRTUAL_PATH_PREFIX
 from pathlib import Path
 import os
 import os.path as op
 import datetime
-from typing import Any, Optional, Type, Dict, Tuple
+from typing import Any, Optional, Type, Dict, Tuple, List
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from abc import ABC, abstractmethod
@@ -12,9 +13,9 @@ from knowlt.logger import logger
 from knowlt.helpers import parse_gitignore, compute_file_hash, generate_id
 from knowlt.settings import ProjectSettings
 from knowlt.embeddings import EmbeddingWorker
+from knowlt.tools import ToolRegistry, BaseTool
 
 
-VIRTUAL_PATH_PREFIX = ".virtual-path"
 
 
 @dataclass
@@ -91,6 +92,8 @@ class ProjectManager:
         # In-memory caches for repos to allow sync helpers to function without async data calls
         self._repos_by_id: dict[str, Repo] = {}
         self._repos_by_name: dict[str, Repo] = {}
+        # Tools
+        self._tools: List[BaseTool] = []
 
         if not self.settings.project_name:
             raise ValueError(f"settings.project_name is required.")
@@ -135,6 +138,14 @@ class ProjectManager:
                 inst.initialize()
             except Exception as exc:
                 logger.error("Component failed to initialize", name=name, exc=exc)
+
+        # Initialize tools
+        disabled_tools = self.settings.tools.disabled
+        self._tools = {
+            name: cls(self)
+            for name, cls in ToolRegistry.get_tools().items()
+            if name not in disabled_tools
+        }
 
     # Simple repo management
     async def add_repo_path(self, name, path: Optional[str] = None):
@@ -319,6 +330,13 @@ class ProjectManager:
                 comp.refresh(scan_result)
             except Exception as exc:
                 logger.error("Component failed to refresh", name=name, exc=exc)
+
+    # Tools
+    def get_tool(self, name) -> "BaseTool":
+        return self._tools.get(name)
+
+    def get_enabled_tools(self) -> List["BaseTool"]:
+        return list(self._tools.values())
 
     # Pluggable lifecycle components
     def add_component(self, name: str, component: ProjectComponent) -> None:

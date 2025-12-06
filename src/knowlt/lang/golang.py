@@ -13,7 +13,9 @@ from knowlt.parsers import (
     get_node_text,
 )
 from knowlt.models import ProgrammingLanguage, NodeKind, Node, ImportEdge, Repo
-from knowlt.project import ProjectManager, ProjectCache
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from knowlt.project import ProjectManager, ProjectCache
 from knowlt.logger import logger
 
 
@@ -33,7 +35,7 @@ class GolangCodeParser(AbstractCodeParser):
     language = ProgrammingLanguage.GO
     extensions = (".go",)
 
-    def __init__(self, pm: ProjectManager, repo: Repo, rel_path: str):
+    def __init__(self, pm: "ProjectManager", repo: Repo, rel_path: str):
         super().__init__(pm, repo, rel_path)
         self.parser = _get_parser()
         self.source_bytes: bytes = b""
@@ -86,7 +88,7 @@ class GolangCodeParser(AbstractCodeParser):
 
         return _handler
 
-    def parse(self, cache: ProjectCache):
+    def parse(self, cache: "ProjectCache"):
         self._load_module_path(cache)
         return super().parse(cache)
 
@@ -120,7 +122,7 @@ class GolangCodeParser(AbstractCodeParser):
         self._debug_unknown_node(node)
         return [self._literal_node(node)]
 
-    def _load_module_path(self, cache: ProjectCache) -> None:
+    def _load_module_path(self, cache: "ProjectCache") -> None:
         project_path = self.repo.root_path
         cache_key = f"go.project.gomods::{self.repo.id}"
         gomods_map = cache.get(cache_key) if cache is not None else None

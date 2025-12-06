@@ -5,7 +5,10 @@ import json
 from typing import Any
 from pydantic import BaseModel, Field
 
-from knowlt.project import ProjectManager, VIRTUAL_PATH_PREFIX
+from typing import TYPE_CHECKING
+from knowlt.consts import VIRTUAL_PATH_PREFIX
+if TYPE_CHECKING:
+    from knowlt.project import ProjectManager
 from knowlt.settings import ProjectSettings, ToolOutput
 from .base import BaseTool
 
@@ -33,7 +36,6 @@ class ReadFilesTool(BaseTool):
 
     async def execute(
         self,
-        pm: ProjectManager,
         req: Any,
     ) -> str:
         req_obj = self.parse_input(req)
@@ -48,13 +50,12 @@ class ReadFilesTool(BaseTool):
           "error": <str> | None                # present on errors
         }
         """
-        await pm.maybe_refresh()
+        await self.pm.maybe_refresh()
 
-        file_repo = pm.data.file
+        file_repo = self.pm.data.file
         raw_path = req_obj.path or ""
         if not raw_path:
             return self.encode_output(
-                pm,
                 ReadFileResp(
                     status=400,
                     content_type=None,
@@ -64,10 +65,9 @@ class ReadFilesTool(BaseTool):
                 ),
             )
 
-        decon = pm.deconstruct_virtual_path(raw_path)
+        decon = self.pm.deconstruct_virtual_path(raw_path)
         if not decon:
             return self.encode_output(
-                pm,
                 ReadFileResp(
                     status=404,
                     content_type=None,
@@ -83,7 +83,6 @@ class ReadFilesTool(BaseTool):
         fm = await file_repo.get_by_paths(repo.id, [rel_path])
         if not fm:
             return self.encode_output(
-                pm,
                 ReadFileResp(
                     status=404,
                     content_type=None,
@@ -99,7 +98,6 @@ class ReadFilesTool(BaseTool):
                 data = f.read()
         except OSError as e:
             return self.encode_output(
-                pm,
                 ReadFileResp(
                     status=500,
                     content_type=None,
@@ -123,7 +121,6 @@ class ReadFilesTool(BaseTool):
             elif "charset=" not in mime and mime.startswith("text/"):
                 mime = f"{mime}; charset=utf-8"
             return self.encode_output(
-                pm,
                 ReadFileResp(
                     status=200,
                     content_type=mime,
@@ -136,7 +133,6 @@ class ReadFilesTool(BaseTool):
             # Binary; return base64
             b64 = base64.b64encode(data).decode("ascii")
             return self.encode_output(
-                pm,
                 ReadFileResp(
                     status=200,
                     content_type=mime,
@@ -146,8 +142,8 @@ class ReadFilesTool(BaseTool):
                 ),
             )
 
-    def encode_output(self, pm: ProjectManager, obj: ReadFileResp) -> str:
-        fmt = self.get_output_format(pm)
+    def encode_output(self, obj: ReadFileResp) -> str:
+        fmt = self.get_output_format(self.pm)
         if fmt == ToolOutput.JSON:
             return json.dumps(
                 obj.model_dump(by_alias=True, exclude_none=True),

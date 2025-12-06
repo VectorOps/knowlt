@@ -19,14 +19,16 @@ from knowlt.parsers import (
     ParsedPackage,
     ParsedNode,
 )
-from knowlt.project import ProjectManager, ProjectCache
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from knowlt.project import ProjectManager, ProjectCache
 
 
 class TextParser(AbstractCodeParser):
     language = ProgrammingLanguage.TEXT
     extensions = (".txt",)
 
-    def __init__(self, pm: ProjectManager, repo: Repo, rel_path: str):
+    def __init__(self, pm: "ProjectManager", repo: Repo, rel_path: str):
         super().__init__(pm, repo, rel_path)
         self.parser = None
         self.source_bytes: bytes = b""
@@ -38,7 +40,7 @@ class TextParser(AbstractCodeParser):
     def _rel_to_virtual_path(self, rel_path: str) -> str:
         return os.path.splitext(rel_path)[0].replace(os.sep, ".")
 
-    def parse(self, cache: ProjectCache) -> ParsedFile:
+    def parse(self, cache: "ProjectCache") -> ParsedFile:
         if not self.repo.root_path:
             raise ValueError("repo.root_path must be set to parse files")
 

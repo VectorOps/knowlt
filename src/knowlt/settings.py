@@ -83,7 +83,7 @@ class ToolSettings(BaseSettings):
         ),
     )
     file_list_limit: int = Field(
-        default=20,
+        default=50,
         description="The default limit for the number of files returned by the list_files tool.",
     )
 

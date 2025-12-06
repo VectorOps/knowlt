@@ -5,7 +5,9 @@ from pydantic import BaseModel, Field
 
 from knowlt.logger import logger
 from knowlt.parsers import CodeParserRegistry, AbstractLanguageHelper
-from knowlt.project import ProjectManager
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from knowlt.project import ProjectManager
 from knowlt.models import ImportEdge, Visibility, Node, NodeKind, Repo
 from knowlt.data import ImportEdgeFilter, NodeFilter
 from knowlt.data_helpers import resolve_node_hierarchy
@@ -30,7 +32,7 @@ class FileSummary(BaseModel):
 
 
 async def build_file_summary(
-    pm: ProjectManager,
+    pm: "ProjectManager",
     repo: Repo,
     rel_path: str,
     summary_mode: SummaryMode = SummaryMode.Definition,

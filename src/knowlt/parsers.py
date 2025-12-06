@@ -16,7 +16,9 @@ from knowlt.models import (
     Node,
     ImportEdge,
 )
-from knowlt.project import ProjectManager, ProjectCache
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from knowlt.project import ProjectManager, ProjectCache
 from knowlt.helpers import compute_file_hash
 from knowlt.logger import logger
 
@@ -120,7 +122,7 @@ class AbstractCodeParser(ABC):
 
     language: ProgrammingLanguage
     extensions: List[str]
-    pm: ProjectManager
+    pm: "ProjectManager"
     repo: Repo
     rel_path: str
     source_bytes: bytes
@@ -135,7 +137,7 @@ class AbstractCodeParser(ABC):
                 raise ValueError(f"{cls.__name__} missing `extensions`")
             CodeParserRegistry.register_parser(cls)
 
-    def __init__(self, pm: ProjectManager, repo: Repo, rel_path: str) -> None:
+    def __init__(self, pm: "ProjectManager", repo: Repo, rel_path: str) -> None:
         self.pm = pm
         self.repo = repo
         self.rel_path = rel_path
@@ -157,7 +159,7 @@ class AbstractCodeParser(ABC):
         pass
 
     # Helpers
-    def parse(self, cache: ProjectCache) -> ParsedFile:
+    def parse(self, cache: "ProjectCache") -> ParsedFile:
         if not self.repo.root_path:
             raise ValueError("repo.root_path must be set to parse files")
 

@@ -3,7 +3,11 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-from knowlt.project import ProjectManager, VIRTUAL_PATH_PREFIX
+from typing import TYPE_CHECKING
+from knowlt.consts import VIRTUAL_PATH_PREFIX
+if TYPE_CHECKING:
+    from knowlt.project import ProjectManager
+from knowlt.settings import ToolSettings
 from .base import BaseTool
 
 
@@ -12,10 +16,6 @@ class ListFilesReq(BaseModel):
 
     pattern: str = Field(
         description="An fnmatch-style glob pattern to match against file paths."
-    )
-    limit: Optional[int] = Field(
-        default=None,
-        description="Maximum number of files to return. Defaults to the system-wide setting.",
     )
 
 
@@ -33,7 +33,6 @@ class ListFilesTool(BaseTool):
 
     async def execute(
         self,
-        pm: ProjectManager,
         req: Any,
     ) -> str:
         req_obj = self.parse_input(req)
@@ -43,29 +42,31 @@ class ListFilesTool(BaseTool):
         If `pattern` is None or empty, return an empty list. The matching is
         done fnmatch-style.
         """
-        await pm.maybe_refresh()
+        await self.pm.maybe_refresh()
 
-        file_repo = pm.data.file
+        file_repo = self.pm.data.file
 
         if not req_obj.pattern:
-            return self.encode_output(pm, [])
+            return self.encode_output([])
 
-        limit = req_obj.limit or pm.settings.tools.file_list_limit
-        matches = await file_repo.glob_search(pm.repo_ids, req_obj.pattern, limit)
+        limit = self.pm.settings.tools.file_list_limit
+        matches = await file_repo.glob_search(self.pm.repo_ids, req_obj.pattern, limit)
 
         items = [
             FileListItem(path=vpath)
             for fm in matches
-            for vpath in [pm.construct_virtual_path(fm.repo_id, fm.path)]
+            for vpath in [self.pm.construct_virtual_path(fm.repo_id, fm.path)]
         ]
-        return self.encode_output(pm, items)
+        return self.encode_output(items)
 
     async def get_openai_schema(self) -> dict:
         """Return the OpenAI schema for this tool."""
+        limit = self.pm.settings.tools.file_list_limit
         return {
             "name": self.tool_name,
             "description": (
-                "Return project files whose path matches the supplied glob pattern. "
+                "Return a list of project files whose path matches the supplied glob pattern. "
+                f"This tool will return up to {limit} files. "
                 f"File paths for repos other than the default repo will be prefixed with '{VIRTUAL_PATH_PREFIX}/<repo_name>'."
             ),
             "parameters": {
@@ -76,10 +77,6 @@ class ListFilesTool(BaseTool):
                         "description": (
                             "An fnmatch-style glob pattern (e.g. '**/*.py')."
                         ),
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of files to return.",
                     },
                 },
                 "required": ["pattern"],
