@@ -82,6 +82,10 @@ class ToolSettings(BaseSettings):
             'Allowed values: "json", "structured_text".'
         ),
     )
+    file_list_limit: int = Field(
+        default=20,
+        description="The default limit for the number of files returned by the list_files tool.",
+    )
 
 
 class RefreshSettings(BaseModel):

@@ -153,11 +153,12 @@ class AbstractFileRepository(AbstractCRUDRepository[File]):
     async def glob_search(
         self,
         repo_ids: Optional[List[ModelId]],
-        patterns: List[str],
+        pattern: str,
+        limit: Optional[int] = None,
     ) -> List[File]:
         """
-        Return files whose project-relative path matches any of the provided
-        glob patterns, optionally restricted to the specified repos.
+        Return files whose project-relative path matches the provided
+        glob pattern, optionally restricted to the specified repos.
         """
 
     @abstractmethod
