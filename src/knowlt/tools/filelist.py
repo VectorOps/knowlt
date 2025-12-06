@@ -1,5 +1,5 @@
 import json
-from typing import Sequence, Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -7,12 +7,15 @@ from knowlt.project import ProjectManager, VIRTUAL_PATH_PREFIX
 from .base import BaseTool
 
 
-# TODO: Result limit
 class ListFilesReq(BaseModel):
     """Request model for listing files."""
 
-    patterns: Sequence[str] = Field(
-        description="List of fnmatch-style glob patterns to match against file paths."
+    pattern: str = Field(
+        description="An fnmatch-style glob pattern to match against file paths."
+    )
+    limit: Optional[int] = Field(
+        default=None,
+        description="Maximum number of files to return. Defaults to the system-wide setting.",
     )
 
 
@@ -23,7 +26,7 @@ class FileListItem(BaseModel):
 
 
 class ListFilesTool(BaseTool):
-    """Tool to list files in the project matching glob patterns."""
+    """Tool to list files in the project matching a glob pattern."""
 
     tool_name = "list_files"
     tool_input = ListFilesReq
@@ -35,20 +38,20 @@ class ListFilesTool(BaseTool):
     ) -> str:
         req_obj = self.parse_input(req)
         """
-        Return files whose path matches any of the supplied glob patterns.
+        Return files whose path matches the supplied glob pattern.
 
-        If `patterns` is None or empty, return an empty list. The matching is
+        If `pattern` is None or empty, return an empty list. The matching is
         done fnmatch-style.
         """
         await pm.maybe_refresh()
 
         file_repo = pm.data.file
 
-        pats = list(req_obj.patterns) if req_obj.patterns else []
-        if not pats:
+        if not req_obj.pattern:
             return self.encode_output(pm, [])
 
-        matches = await file_repo.glob_search(pm.repo_ids, pats)
+        limit = req_obj.limit or pm.settings.tools.file_list_limit
+        matches = await file_repo.glob_search(pm.repo_ids, req_obj.pattern, limit)
 
         items = [
             FileListItem(path=vpath)
@@ -62,22 +65,23 @@ class ListFilesTool(BaseTool):
         return {
             "name": self.tool_name,
             "description": (
-                "Return all project files whose path matches at least one "
-                "of the supplied glob patterns. File paths for repos other than the "
-                f"default repo will be prefixed with '{VIRTUAL_PATH_PREFIX}/<repo_name>'."
+                "Return project files whose path matches the supplied glob pattern. "
+                f"File paths for repos other than the default repo will be prefixed with '{VIRTUAL_PATH_PREFIX}/<repo_name>'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "patterns": {
-                        "type": "array",
-                        "items": {"type": "string"},
+                    "pattern": {
+                        "type": "string",
                         "description": (
-                            "List of fnmatch-style glob patterns "
-                            "(e.g. ['**/*.py', 'src/*.ts'])."
+                            "An fnmatch-style glob pattern (e.g. '**/*.py')."
                         ),
-                    }
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of files to return.",
+                    },
                 },
-                "required": [],
+                "required": ["pattern"],
             },
         }

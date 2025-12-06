@@ -30,16 +30,17 @@ async def _make_pm():
 
 
 @pytest.mark.asyncio
-async def test_schema_has_name_and_patterns_array():
+async def test_schema_has_name_and_pattern_string():
     tool = ListFilesTool()
     schema = await tool.get_openai_schema()
     assert schema["name"] == "list_files"
     assert schema["parameters"]["type"] == "object"
-    assert "patterns" in schema["parameters"]["properties"]
-    assert schema["parameters"]["properties"]["patterns"]["type"] == "array"
-    # patterns are optional
+    assert "pattern" in schema["parameters"]["properties"]
+    assert schema["parameters"]["properties"]["pattern"]["type"] == "string"
+    assert "limit" in schema["parameters"]["properties"]
+    assert schema["parameters"]["properties"]["limit"]["type"] == "integer"
     assert "required" in schema["parameters"]
-    assert schema["parameters"]["required"] == []
+    assert schema["parameters"]["required"] == ["pattern"]
 
 
 @pytest.mark.asyncio
@@ -47,7 +48,7 @@ async def test_execute_list_python_files_returns_list():
     pm, _repo = await _make_pm()
     try:
         tool = ListFilesTool()
-        out = await tool.execute(pm, {"patterns": ["*.py"]})
+        out = await tool.execute(pm, {"pattern": "*.py"})
         payload = json.loads(out)
         print(payload)
         assert isinstance(payload, list)
@@ -62,7 +63,7 @@ async def test_execute_no_matches_returns_empty_list():
     pm, _repo = await _make_pm()
     try:
         tool = ListFilesTool()
-        out = await tool.execute(pm, {"patterns": ["**/*.doesnotexist"]})
+        out = await tool.execute(pm, {"pattern": "**/*.doesnotexist"})
         payload = json.loads(out)
         assert payload == []
     finally:
