@@ -1,3 +1,4 @@
+from unittest.mock import MagicMock
 import json
 from pathlib import Path
 import pytest
@@ -32,7 +33,8 @@ async def _make_pm():
 
 @pytest.mark.asyncio
 async def test_schema_includes_supported_modes_and_defaults():
-    tool = NodeSearchTool()
+    pm = MagicMock()
+    tool = NodeSearchTool(pm)
     schema = await tool.get_openai_schema()
     enum_vals = schema["parameters"]["properties"]["summary_mode"]["enum"]
     # Node search supports all SummaryMode options (including 'source' and 'skip')
@@ -41,7 +43,7 @@ async def test_schema_includes_supported_modes_and_defaults():
     # default should be 'definition'
     assert (
         schema["parameters"]["properties"]["summary_mode"]["default"]
-        == SummaryMode.Definition.value
+        == SummaryMode.Documentation.value
     )
     # visibility should include 'all'
     vis_vals = schema["parameters"]["properties"]["visibility"]["enum"]
@@ -55,9 +57,8 @@ async def test_execute_nodesearch_skip_mode_returns_list():
         # Force tool output to JSON for stable assertions
         pm.settings.tools.outputs["search_project"] = ToolOutput.JSON
 
-        tool = NodeSearchTool()
+        tool = NodeSearchTool(pm)
         out = await tool.execute(
-            pm,
             {
                 "global_search": True,
                 # avoid embedding computation by not passing a free-text query
@@ -75,10 +76,9 @@ async def test_execute_nodesearch_skip_mode_returns_list():
 async def test_execute_raises_on_invalid_visibility():
     pm, _repo = await _make_pm()
     try:
-        tool = NodeSearchTool()
+        tool = NodeSearchTool(pm)
         with pytest.raises(ValueError):
             await tool.execute(
-                pm,
                 {
                     "visibility": "bogus",
                     "summary_mode": SummaryMode.Skip.value,

@@ -13,7 +13,9 @@ from knowlt.parsers import (
     get_node_text,
 )
 from knowlt.models import ProgrammingLanguage, NodeKind, Node, ImportEdge, Repo
-from knowlt.project import ProjectManager, ProjectCache
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from knowlt.project import ProjectManager, ProjectCache
 from knowlt.settings import PythonSettings
 from knowlt.logger import logger
 
@@ -33,7 +35,7 @@ class PythonCodeParser(AbstractCodeParser):
     extensions = [".py"]
     settings: PythonSettings
 
-    def __init__(self, pm: ProjectManager, repo: Repo, rel_path: str) -> None:
+    def __init__(self, pm: "ProjectManager", repo: Repo, rel_path: str) -> None:
         super().__init__(pm, repo, rel_path)
         self.parser = _get_parser()
         # Cache frequently re-used values per instance

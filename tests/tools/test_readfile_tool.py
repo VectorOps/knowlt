@@ -1,3 +1,4 @@
+from unittest.mock import MagicMock
 import base64
 import json
 from pathlib import Path
@@ -43,11 +44,11 @@ async def test_execute_read_text_file_json(tmp_path: Path):
         # Force JSON output for stable assertions
         pm.settings.tools.outputs["read_files"] = ToolOutput.JSON
 
-        tool = ReadFilesTool()
+        tool = ReadFilesTool(pm)
         vpath = pm.construct_virtual_path(repo.id, "hello.txt")
 
         # Act
-        out = await tool.execute(pm, {"path": vpath})
+        out = await tool.execute({"path": vpath})
         payload = json.loads(out)
 
         # Assert
@@ -73,11 +74,11 @@ async def test_execute_read_binary_file_json(tmp_path: Path):
     try:
         pm.settings.tools.outputs["read_files"] = ToolOutput.JSON
 
-        tool = ReadFilesTool()
+        tool = ReadFilesTool(pm)
         vpath = pm.construct_virtual_path(repo.id, "img.png")
 
         # Act
-        out = await tool.execute(pm, {"path": vpath})
+        out = await tool.execute({"path": vpath})
         payload = json.loads(out)
 
         # Assert
@@ -99,16 +100,16 @@ async def test_execute_invalid_and_empty_path_errors(tmp_path: Path):
     pm, _repo = await _make_pm(tmp_path)
     try:
         pm.settings.tools.outputs["read_files"] = ToolOutput.JSON
-        tool = ReadFilesTool()
+        tool = ReadFilesTool(pm)
 
         # Invalid (non-virtual) path => 404
-        out_404 = await tool.execute(pm, {"path": "not-a-virtual-path.txt"})
+        out_404 = await tool.execute({"path": "not-a-virtual-path.txt"})
         payload_404 = json.loads(out_404)
         assert payload_404["status"] == 404
         assert "error" in payload_404
 
         # Empty path => 400
-        out_400 = await tool.execute(pm, {"path": ""})
+        out_400 = await tool.execute({"path": ""})
         payload_400 = json.loads(out_400)
         assert payload_400["status"] == 400
         assert "error" in payload_400
@@ -126,11 +127,11 @@ async def test_structured_text_output_headers(tmp_path: Path):
     pm, repo = await _make_pm(tmp_path)
     try:
         # Default for ReadFilesTool is structured text; do not override
-        tool = ReadFilesTool()
+        tool = ReadFilesTool(pm)
         vpath = pm.construct_virtual_path(repo.id, "greet.txt")
 
         # Act
-        out = await tool.execute(pm, {"path": vpath})
+        out = await tool.execute({"path": vpath})
 
         # Assert: HTTP-like headers and body
         assert out.startswith("Status: 200 OK")

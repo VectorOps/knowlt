@@ -1,3 +1,4 @@
+from unittest.mock import MagicMock
 # tests/tools/test_filesummary_tool.py
 import json
 from pathlib import Path
@@ -33,7 +34,8 @@ async def _make_pm():
 
 @pytest.mark.asyncio
 async def test_schema_excludes_unsupported_modes():
-    tool = SummarizeFilesTool()
+    pm = MagicMock()
+    tool = SummarizeFilesTool(pm)
     schema = await tool.get_openai_schema()
     enum_vals = schema["parameters"]["properties"]["summary_mode"]["enum"]
     # 'source' and 'skip' are not supported by the tool schema
@@ -53,9 +55,8 @@ async def test_execute_summarize_python_sample_file():
         # Force tool output to JSON for stable assertions
         pm.settings.tools.outputs["summarize_files"] = ToolOutput.JSON
 
-        tool = SummarizeFilesTool()
+        tool = SummarizeFilesTool(pm)
         out = await tool.execute(
-            pm,
             {
                 "paths": [
                     "simple.py",
@@ -81,10 +82,9 @@ async def test_execute_raises_on_source_mode():
     pm, repo = await _make_pm()
     try:
         vpath = pm.construct_virtual_path(repo.id, "simple.py")
-        tool = SummarizeFilesTool()
+        tool = SummarizeFilesTool(pm)
         with pytest.raises(ValueError):
             await tool.execute(
-                pm,
                 {
                     "paths": [vpath],
                     "summary_mode": "source",  # unsupported

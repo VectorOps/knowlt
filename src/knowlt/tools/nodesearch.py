@@ -5,7 +5,10 @@ from pydantic import BaseModel, Field
 
 from knowlt.data import NodeSearchQuery
 from knowlt.models import NodeKind, Visibility
-from knowlt.project import ProjectManager, VIRTUAL_PATH_PREFIX
+from typing import TYPE_CHECKING
+from knowlt.consts import VIRTUAL_PATH_PREFIX
+if TYPE_CHECKING:
+    from knowlt.project import ProjectManager
 from .base import BaseTool
 from knowlt.summary import SummaryMode
 from knowlt.data_helpers import populate_packages_for_files
@@ -43,7 +46,7 @@ class NodeSearchReq(BaseModel):
         default=0, description="Number of results to skip. Used for pagination."
     )
     summary_mode: SummaryMode | str = Field(
-        default=SummaryMode.Definition,
+        default=SummaryMode.Documentation,
         description="Amount of source code to include with each match",
     )
 
@@ -69,11 +72,10 @@ class NodeSearchTool(BaseTool):
 
     async def execute(
         self,
-        pm: ProjectManager,
         req: Any,
     ) -> str:
         req = self.parse_input(req)
-        await pm.maybe_refresh()
+        await self.pm.maybe_refresh()
 
         # visibility
         vis = None
@@ -105,12 +107,12 @@ class NodeSearchTool(BaseTool):
         # transform free-text query -> embedding vector (if requested)
         embedding_vec = None
         if req.query:
-            embedding_vec = await pm.compute_embedding(req.query)
+            embedding_vec = await self.pm.compute_embedding(req.query)
 
         if req.global_search:
-            repo_ids = pm.repo_ids
+            repo_ids = self.pm.repo_ids
         else:
-            repo_ids = [pm.default_repo.id]
+            repo_ids = [self.pm.default_repo.id]
 
         final_limit = req.limit or 25
 
@@ -119,16 +121,16 @@ class NodeSearchTool(BaseTool):
             visibility=vis,
             needle=req.query,
             embedding_query=embedding_vec,
-            boost_repo_id=pm.default_repo.id,
-            repo_boost_factor=pm.settings.search.default_repo_boost,
+            boost_repo_id=self.pm.default_repo.id,
+            repo_boost_factor=self.pm.settings.search.default_repo_boost,
             limit=final_limit,
             offset=req.offset,
         )
 
-        nodes = await pm.data.node.search(query)
+        nodes = await self.pm.data.node.search(query)
 
-        file_repo = pm.data.file
-        package_repo = pm.data.package
+        file_repo = self.pm.data.file
+        package_repo = self.pm.data.package
 
         # Batch load files for all nodes, then batch load packages referenced by those files.
         file_ids = [s.file_id for s in nodes if getattr(s, "file_id", None)]
@@ -146,7 +148,7 @@ class NodeSearchTool(BaseTool):
             file_path = None
             if s.file_id and s.file_id in file_by_id:
                 fm = file_by_id[s.file_id]
-                file_path = pm.construct_virtual_path(s.repo_id, fm.path)
+                file_path = self.pm.construct_virtual_path(s.repo_id, fm.path)
                 # get language from package if available
                 if fm.package and getattr(fm.package, "language", None):
                     helper = CodeParserRegistry.get_helper(fm.package.language)
@@ -173,11 +175,10 @@ class NodeSearchTool(BaseTool):
                     body=sym_body,
                 )
             )
-        return self.encode_output(pm, results)
+        return self.encode_output(results)
 
     async def get_openai_schema(self) -> dict:
         visibility_enum = [v.value for v in Visibility] + ["all"]
-        summary_enum = [m.value for m in SummaryMode]
 
         return {
             "name": self.tool_name,
@@ -190,6 +191,12 @@ class NodeSearchTool(BaseTool):
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "summary_mode": {
+                        "type": "string",
+                        "enum": [m.value for m in SummaryMode],
+                        "description": "Amount of source code to include with each match",
+                        "default": SummaryMode.Documentation.value,
+                    },
                     "visibility": {
                         "type": "string",
                         "enum": visibility_enum,
@@ -204,14 +211,6 @@ class NodeSearchTool(BaseTool):
                         "description": (
                             "Natural-language search string evaluated against docstrings, comments, and code "
                             "with both full-text and vector search. Use when you don’t know the exact name."
-                        ),
-                    },
-                    "summary_mode": {
-                        "type": "string",
-                        "enum": summary_enum,
-                        "default": SummaryMode.Definition.value,
-                        "description": (
-                            "Amount of source code to include with each match"
                         ),
                     },
                 },

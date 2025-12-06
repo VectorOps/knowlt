@@ -13,7 +13,10 @@ from knowlt.parsers import (
     get_node_text,
 )
 from knowlt.models import ProgrammingLanguage, NodeKind, Node
-from knowlt.project import ProjectManager, Repo
+from knowlt.models import Repo
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from knowlt.project import ProjectManager
 from knowlt.logger import logger
 
 JS_LANGUAGE = ts.Language(tsjs.language())
@@ -32,7 +35,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
     extensions = [".js", ".jsx", ".mjs"]
     _RESOLVE_SUFFIXES = (".js", ".jsx", ".mjs")
 
-    def __init__(self, pm: ProjectManager, repo: Repo, rel_path: str) -> None:
+    def __init__(self, pm: "ProjectManager", repo: Repo, rel_path: str) -> None:
         super().__init__(pm, repo, rel_path)
         self.parser = _get_parser()
         self._handlers: dict[

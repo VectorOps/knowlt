@@ -16,7 +16,9 @@ from knowlt.parsers import (
     AbstractLanguageHelper,
     ParsedNode,
 )
-from knowlt.project import ProjectManager, ProjectCache
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from knowlt.project import ProjectManager, ProjectCache
 
 MARKDOWN_LANGUAGE = Language(tsmd.language())
 
@@ -34,7 +36,7 @@ class MarkdownCodeParser(AbstractCodeParser):
     language = ProgrammingLanguage.MARKDOWN
     extensions = (".md", ".markdown")
 
-    def __init__(self, pm: ProjectManager, repo: Repo, rel_path: str):
+    def __init__(self, pm: "ProjectManager", repo: Repo, rel_path: str):
         super().__init__(pm, repo, rel_path)
         self.parser = _get_parser()
         self.chunker: AbstractChunker = create_project_chunker(pm)

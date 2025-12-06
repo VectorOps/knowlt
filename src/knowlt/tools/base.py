@@ -7,7 +7,9 @@ from enum import Enum
 from pydantic import BaseModel
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from knowlt.project import ProjectManager
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from knowlt.project import ProjectManager
 from knowlt.settings import ProjectSettings, ToolOutput
 from . import helpers
 
@@ -25,8 +27,11 @@ class BaseTool(ABC):
         if not inspect.isabstract(cls):
             ToolRegistry.register_tool(cls)
 
+    def __init__(self, pm: "ProjectManager"):
+        self.pm = pm
+
     @abstractmethod
-    async def execute(self, pm: ProjectManager, req: Any) -> str:
+    async def execute(self, req: Any) -> str:
         """
         Execute the tool for the provided request.
         Request can be:
@@ -34,6 +39,13 @@ class BaseTool(ABC):
           - a Pydantic BaseModel,
           - or a JSON string.
         Implementations should parse req via `self.parse_input(req)`.
+        """
+        pass
+
+    @abstractmethod
+    async def get_openai_schema(self) -> dict:
+        """
+        Returns OpenAI function calling schema.
         """
         pass
 
@@ -64,20 +76,13 @@ class BaseTool(ABC):
 
         return model_cls.model_validate(data)
 
-    @abstractmethod
-    async def get_openai_schema(self) -> dict:
-        """
-        Returns OpenAI function calling schema.
-        """
-        pass
-
     # convenience instance wrapper
     def to_python(self, obj: Any) -> Any:
         return helpers.convert_to_python(obj)
 
     def get_output_format(
         self,
-        pm: ProjectManager,
+        pm: "ProjectManager",
     ) -> ToolOutput:
         """
         Resolve the effective output format for this tool:
@@ -95,14 +100,14 @@ class BaseTool(ABC):
 
         return encoding or self.default_output
 
-    def encode_output(self, pm: ProjectManager, obj: Any) -> str:
+    def encode_output(self, obj: Any) -> str:
         """
         Convert a tool's execute() return value into a string to send as tool output.
         Uses settings.tools.outputs[tool_name] if provided; otherwise falls back to the tool's
         default_output (usually JSON).
         """
         # Resolve output encoding
-        encoding = self.get_output_format(pm)
+        encoding = self.get_output_format(self.pm)
 
         # Encode by selected format
         if encoding == ToolOutput.STRUCTURED_TEXT:
@@ -188,13 +193,8 @@ class ToolRegistry:
         if not name:
             raise ValueError(f"{tool_cls.__name__} missing `tool_name`")
         if name not in cls._tools:  # keep singletons
-            cls._tools[name] = tool_cls()
+            cls._tools[name] = tool_cls
 
     @classmethod
-    def get(cls, name: str) -> "BaseTool":
-        return cls._tools[name]
-
-    @classmethod
-    def get_enabled_tools(cls, settings: ProjectSettings) -> list["BaseTool"]:
-        disabled_tools = settings.tools.disabled
-        return [tool for name, tool in cls._tools.items() if name not in disabled_tools]
+    def get_tools(cls) -> Dict[str, "BaseTool"]:
+        return cls._tools
