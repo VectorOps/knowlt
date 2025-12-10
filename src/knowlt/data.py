@@ -116,6 +116,10 @@ class AbstractPackageRepository(AbstractCRUDRepository[Package]):
 class FileFilter:
     repo_ids: Optional[List[ModelId]] = None
     package_id: Optional[ModelId] = None
+    # If set, results from this repo_id should be boosted / prioritized.
+    boost_repo_id: Optional[ModelId] = None
+    # Default multiplicative boost factor when boost_repo_id is used.
+    repo_boost_factor: float = 1.2
 
 
 class AbstractFileRepository(AbstractCRUDRepository[File]):
@@ -130,7 +134,12 @@ class AbstractFileRepository(AbstractCRUDRepository[File]):
 
     @abstractmethod
     async def filename_complete(
-        self, needle: str, repo_ids: Optional[List[str]] = None, limit: int = 5
+        self,
+        needle: str,
+        repo_ids: Optional[List[str]] = None,
+        limit: int = 5,
+        boost_repo_id: Optional[ModelId] = None,
+        repo_boost_factor: float = 1.2,
     ) -> List[File]:
         """
         Fuzzy-complete file paths by name using a Sublime Text–like subsequence match.
@@ -155,6 +164,8 @@ class AbstractFileRepository(AbstractCRUDRepository[File]):
         repo_ids: Optional[List[ModelId]],
         pattern: str,
         limit: Optional[int] = None,
+        boost_repo_id: Optional[ModelId] = None,
+        repo_boost_factor: float = 1.2,
     ) -> List[File]:
         """
         Return files whose project-relative path matches the provided
@@ -195,8 +206,8 @@ class NodeSearchQuery:
     # ID of a repo whose symbols should be boosted in search results
     boost_repo_id: Optional[ModelId] = None
     # Boost factor to apply. Only used if boost_repo_id is also provided.
-    # Values > 1.0 will boost, < 1.0 will penalize. Default is 1.0 (no change).
-    repo_boost_factor: float = 1.0
+    # Values > 1.0 will boost, < 1.0 will penalize.
+    repo_boost_factor: float = 1.2
     # Number of records to return. If None is passed, no limit will be applied.
     limit: Optional[int] = None
     # Zero-based offset

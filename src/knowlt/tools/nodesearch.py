@@ -7,6 +7,7 @@ from knowlt.data import NodeSearchQuery
 from knowlt.models import NodeKind, Visibility
 from typing import TYPE_CHECKING
 from knowlt.consts import VIRTUAL_PATH_PREFIX
+
 if TYPE_CHECKING:
     from knowlt.project import ProjectManager
 from .base import BaseTool
@@ -210,7 +211,9 @@ class NodeSearchTool(BaseTool):
                         "type": "string",
                         "description": (
                             "Natural-language search string evaluated against docstrings, comments, and code "
-                            "with both full-text and vector search. Use when you don’t know the exact name."
+                            "with both full-text and vector search. Use when you don’t know the exact name. "
+                            "Search does not support any special operators such as logical conditions, double "
+                            "quotes and similar."
                         ),
                     },
                 },
