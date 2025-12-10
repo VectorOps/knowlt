@@ -99,7 +99,36 @@ class ProjectManager:
             raise ValueError(f"settings.project_name is required.")
         if not self.settings.repo_name:
             raise ValueError(f"settings.repo_name is required.")
+    def _cache_repo(self, repo: Repo) -> Repo:
+        """
+        Store *repo* in all local repo caches and return it.
+        """
+        self._repos_by_id[repo.id] = repo
+        self._repos_by_name[repo.name] = repo
+        return repo
 
+    def _uncache_repo(self, repo: Repo) -> None:
+        """
+        Remove *repo* from all local repo caches.
+        """
+        self._repos_by_id.pop(repo.id, None)
+        existing = self._repos_by_name.get(repo.name)
+        if existing is repo:
+            self._repos_by_name.pop(repo.name, None)
+
+    async def _get_repo_cached_by_name(self, name: str) -> Optional[Repo]:
+        """
+        Return repo by *name* from cache when available, otherwise load
+        it from the data repository and cache the result.
+        """
+        repo = self._repos_by_name.get(name)
+        if repo is not None:
+            return repo
+
+        repo = await self.data.repo.get_by_name(name)
+        if repo is not None:
+            self._cache_repo(repo)
+        return repo
     @classmethod
     async def create(
         self,
@@ -124,6 +153,11 @@ class ProjectManager:
 
         self.project = project
         self.repo_ids = await self.data.project_repo.get_repo_ids(project.id)
+        # Preload repo cache so sync helpers can resolve all known repos.
+        if self.repo_ids:
+            repos = await self.data.repo.get_by_ids(self.repo_ids)
+            for repo in repos:
+                self._cache_repo(repo)
 
         # Initialize default repo
         self.default_repo = await self.add_repo_path(
@@ -149,7 +183,7 @@ class ProjectManager:
 
     # Simple repo management
     async def add_repo_path(self, name, path: Optional[str] = None):
-        repo = await self.data.repo.get_by_name(name)
+        repo = await self._get_repo_cached_by_name(name)
         if repo is None:
             if path is None:
                 raise ValueError(f"Path is required for a new repo {name}")
@@ -187,9 +221,8 @@ class ProjectManager:
             self.repo_ids.append(repo.id)
             await self.data.project_repo.add_repo_id(self.project.id, repo.id)
 
-        # Update caches
-        self._repos_by_id[repo.id] = repo
-        self._repos_by_name[repo.name] = repo
+        # Ensure caches stay in sync
+        self._cache_repo(repo)
 
         return repo
 
@@ -197,9 +230,9 @@ class ProjectManager:
         if repo_id in self.repo_ids:
             self.repo_ids.remove(repo_id)
         # Remove from caches
-        repo = self._repos_by_id.pop(repo_id, None)
+        repo = self._repos_by_id.get(repo_id)
         if repo is not None:
-            self._repos_by_name.pop(repo.name, None)
+            self._uncache_repo(repo)
 
         # Data-layer removal may not be supported by the abstract interface
         remover = getattr(
