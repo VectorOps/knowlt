@@ -112,7 +112,7 @@ class SearchSettings(BaseModel):
     """Settings for search-related functionality."""
 
     default_repo_boost: float = Field(
-        default=1.1,
+        default=1.2,
         description=(
             "Boost factor for search results from the default repository. Applied when a free-text `query` "
             "is provided. Values > 1.0 will boost, < 1.0 will penalize."

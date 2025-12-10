@@ -584,6 +584,17 @@ class DuckDBFileRepo(_DuckDBBaseRepo[File], data.AbstractFileRepository):
         if flt.package_id:
             q = q.where(self._table.package_id == flt.package_id)
 
+        # If a boost_repo_id is provided, prioritize that repo in ordering.
+        if flt.boost_repo_id:
+            repo_priority = (
+                Case()
+                .when(self._table.repo_id == flt.boost_repo_id, 0)
+                .else_(1)
+            )
+            q = q.orderby(repo_priority, order=Order.asc).orderby(self._table.path)
+        else:
+            q = q.orderby(self._table.path)
+
         rows = await self._execute(q)
         return [self.model(**self._deserialize_data(r)) for r in rows]
 
@@ -592,6 +603,8 @@ class DuckDBFileRepo(_DuckDBBaseRepo[File], data.AbstractFileRepository):
         repo_ids: Optional[List[ModelId]],
         pattern: str,
         limit: Optional[int] = None,
+        boost_repo_id: Optional[ModelId] = None,
+        repo_boost_factor: float = 1.2,
     ) -> List[File]:
         """
         Search files using DuckDB's GLOB operator against files.path.
@@ -609,9 +622,18 @@ class DuckDBFileRepo(_DuckDBBaseRepo[File], data.AbstractFileRepository):
         if repo_ids is not None:
             q = q.where(self._table.repo_id.isin(repo_ids))
 
-        q = q.where(Glob(self._table.path, ValueWrapper(pattern))).orderby(
-            self._table.path
-        )
+        q = q.where(Glob(self._table.path, ValueWrapper(pattern)))
+
+        # If a boost_repo_id is provided, prioritize that repo in ordering.
+        if boost_repo_id:
+            repo_priority = (
+                Case()
+                .when(self._table.repo_id == boost_repo_id, 0)
+                .else_(1)
+            )
+            q = q.orderby(repo_priority, order=Order.asc).orderby(self._table.path)
+        else:
+            q = q.orderby(self._table.path)
 
         if limit is not None:
             q = q.limit(limit)
@@ -620,7 +642,12 @@ class DuckDBFileRepo(_DuckDBBaseRepo[File], data.AbstractFileRepository):
         return [self.model(**self._deserialize_data(r)) for r in rows]
 
     async def filename_complete(
-        self, needle: str, repo_ids: Optional[list[str]] = None, limit: int = 5
+        self,
+        needle: str,
+        repo_ids: Optional[list[str]] = None,
+        limit: int = 5,
+        boost_repo_id: Optional[ModelId] = None,
+        repo_boost_factor: float = 1.2,
     ) -> list[File]:
         if not needle:
             return []
@@ -668,7 +695,7 @@ class DuckDBFileRepo(_DuckDBBaseRepo[File], data.AbstractFileRepository):
         )
         tri_hits_val = functions.Coalesce(tri_hits_col, 0)
 
-        score = (
+        base_score = (
             Case().when(base_subseq, 20).else_(0)
             + Case().when(subseq, 10).else_(0)
             + tri_hits_val * 2
@@ -679,6 +706,16 @@ class DuckDBFileRepo(_DuckDBBaseRepo[File], data.AbstractFileRepository):
         cond = subseq
         if repo_ids:
             cond = cond & (files_tbl.repo_id.isin(repo_ids))
+
+        # Apply repo boost only when boost_repo_id is provided.
+        score = base_score
+        if boost_repo_id:
+            repo_boost_case = (
+                Case()
+                .when(files_tbl.repo_id == boost_repo_id, repo_boost_factor)
+                .else_(1.0)
+            )
+            score = base_score * repo_boost_case
 
         q = (
             q.select(files_tbl.star, score.as_("score"))
@@ -939,8 +976,18 @@ class DuckDBNodeRepo(_DuckDBBaseRepo[Node], data.AbstractNodeRepository):
                 q.select("*")
                 .join(aliased_candidates)
                 .on(self._table.id == aliased_candidates.id)
-                .orderby(self._table.name)
             )
+
+            # If a boost_repo_id is provided, prioritize that repo in ordering.
+            if query.boost_repo_id:
+                repo_priority = (
+                    Case()
+                    .when(self._table.repo_id == query.boost_repo_id, 0)
+                    .else_(1)
+                )
+                q = q.orderby(repo_priority, order=Order.asc).orderby(self._table.name)
+            else:
+                q = q.orderby(self._table.name)
 
         raw_limit = query.limit if query.limit is not None else 20
         offset = query.offset if query.offset is not None else 0

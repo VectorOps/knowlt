@@ -36,6 +36,7 @@ class ListFilesTool(BaseTool):
         req: Any,
     ) -> str:
         req_obj = self.parse_input(req)
+
         """
         Return files whose path matches the supplied glob pattern.
 
@@ -50,7 +51,17 @@ class ListFilesTool(BaseTool):
             return self.encode_output([])
 
         limit = self.pm.settings.tools.file_list_limit
-        matches = await file_repo.glob_search(self.pm.repo_ids, req_obj.pattern, limit)
+        # Boost files from the project's default repository when listing.
+        boost_repo_id = self.pm.default_repo.id
+        boost_factor = self.pm.settings.search.default_repo_boost
+
+        matches = await file_repo.glob_search(
+            self.pm.repo_ids,
+            req_obj.pattern,
+            limit,
+            boost_repo_id=boost_repo_id,
+            repo_boost_factor=boost_factor,
+        )
 
         items = [
             FileListItem(path=vpath)
