@@ -50,6 +50,9 @@ def project_env(tmp_path):
     mock_data.repo.get_by_name = AsyncMock(
         side_effect=lambda name: repos_by_name.get(name)
     )
+    mock_data.repo.get_by_ids = AsyncMock(
+        side_effect=lambda ids: [repos_by_id[i] for i in ids if i in repos_by_id]
+    )
     # AbstractCRUDRepository semantics: create/update return lists
     mock_data.project_repo.add_repo_id = AsyncMock()
     mock_data.repo.create = AsyncMock()
