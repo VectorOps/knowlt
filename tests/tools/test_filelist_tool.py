@@ -7,6 +7,7 @@ from knowlt.stores.duckdb import DuckDBDataRepository
 from knowlt.settings import ProjectSettings, ToolSettings
 from knowlt.project import ProjectManager
 from knowlt.tools.filelist import ListFilesTool
+from knowlt.consts import VIRTUAL_PATH_PREFIX
 
 
 SAMPLES_DIR = Path(__file__).parents[1] / "lang" / "python" / "samples"
@@ -58,6 +59,35 @@ async def test_execute_list_python_files_returns_list():
         assert isinstance(payload, list)
         # should include at least one .py file from samples
         assert any(item["path"].endswith(".py") for item in payload)
+    finally:
+        await pm.destroy()
+
+
+@pytest.mark.asyncio
+async def test_execute_virtual_path_prefix_limits_to_repo():
+    pm, repo = await _make_pm()
+    try:
+        tool = ListFilesTool(pm)
+        pattern = f"{VIRTUAL_PATH_PREFIX}/{repo.name}/*.py"
+        out = await tool.execute({"pattern": pattern})
+        payload = json.loads(out)
+
+        assert isinstance(payload, list)
+        # Should include at least one .py file from the repo
+        assert any(item["path"].endswith(".py") for item in payload)
+    finally:
+        await pm.destroy()
+
+
+@pytest.mark.asyncio
+async def test_execute_unknown_virtual_repo_returns_empty_list():
+    pm, _repo = await _make_pm()
+    try:
+        tool = ListFilesTool(pm)
+        pattern = f"{VIRTUAL_PATH_PREFIX}/nonexistent-repo/*.py"
+        out = await tool.execute({"pattern": pattern})
+        payload = json.loads(out)
+        assert payload == []
     finally:
         await pm.destroy()
 
