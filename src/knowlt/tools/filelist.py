@@ -30,7 +30,6 @@ class ListFilesTool(BaseTool):
 
     tool_name = "list_files"
     tool_input = ListFilesReq
-
     async def execute(
         self,
         req: Any,
@@ -42,13 +41,44 @@ class ListFilesTool(BaseTool):
 
         If `pattern` is None or empty, return an empty list. The matching is
         done fnmatch-style.
+
+        If the pattern includes a virtual-path or project-path repo prefix,
+        it is decoded to a specific repo and the glob is applied only to that
+        repo using a repo-relative pattern.
         """
         await self.pm.maybe_refresh()
 
-        file_repo = self.pm.data.file
-
         if not req_obj.pattern:
             return self.encode_output([])
+
+        pattern = req_obj.pattern
+        search_pattern = pattern
+        repo_ids = self.pm.repo_ids
+
+        # Always attempt to decode via ProjectManager.deconstruct_virtual_path.
+        # We only scope to a specific repo when the pattern explicitly includes
+        # a repo prefix (virtual-path or project-path).
+        decoded = self.pm.deconstruct_virtual_path(pattern)
+        if decoded is not None:
+            repo, relative_pattern = decoded
+            explicit = False
+
+            # Explicit virtual-path prefix, e.g. ".virtual-path/repo_name/..."
+            if pattern.startswith(VIRTUAL_PATH_PREFIX + "/"):
+                explicit = True
+            else:
+                # Explicit project-path prefix, e.g. "repo_name/..."
+                repo_prefix = repo.name + "/"
+                if pattern.startswith(repo_prefix):
+                    explicit = True
+
+            if explicit:
+                if repo.id not in self.pm.repo_ids:
+                    return self.encode_output([])
+                repo_ids = [repo.id]
+                search_pattern = relative_pattern or "**/*"
+
+        file_repo = self.pm.data.file
 
         limit = self.pm.settings.tools.file_list_limit
         # Boost files from the project's default repository when listing.
@@ -56,8 +86,8 @@ class ListFilesTool(BaseTool):
         boost_factor = self.pm.settings.search.default_repo_boost
 
         matches = await file_repo.glob_search(
-            self.pm.repo_ids,
-            req_obj.pattern,
+            repo_ids,
+            search_pattern,
             limit,
             boost_repo_id=boost_repo_id,
             repo_boost_factor=boost_factor,
@@ -86,7 +116,10 @@ class ListFilesTool(BaseTool):
                     "pattern": {
                         "type": "string",
                         "description": (
-                            "An fnmatch-style glob pattern (e.g. '**/*.py')."
+                            "An fnmatch-style glob pattern (e.g. '**/*.py'). "
+                            "You may optionally prefix the pattern with a virtual-path "
+                            f"('{VIRTUAL_PATH_PREFIX}/<repo_name>/...') or project-path "
+                            "('<repo_name>/...') repo name to limit the search to that repo."
                         ),
                     },
                 },
