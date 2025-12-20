@@ -1,6 +1,6 @@
 #+title: Know Lite
 * [ ] General
-** [ ] Prase unknown files that are not binary as text
+** [ ] Parse unknown files that are not binary as text
 ** [ ] Write data model documentation
 ** [ ] Add a way to initialize project, but only scan and work from a subpath
 ** [ ] Method to fully reparse the repo in project
