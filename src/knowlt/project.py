@@ -325,13 +325,19 @@ class ProjectManager:
         await self.refresh_components(scan_result)
         self._last_refresh_time = datetime.datetime.now(datetime.timezone.utc)
 
-    async def refresh_all(self) -> None:
+    async def refresh_all(
+        self,
+        progress_callback: Optional[callable] = None,
+    ) -> None:
         """Refresh all repositories in the project."""
         repos_to_refresh = await self.data.repo.get_by_ids(self.repo_ids)
         for repo in repos_to_refresh:
-            await self.refresh(repo)
+            await self.refresh(repo, progress_callback=progress_callback)
 
-    async def maybe_refresh(self) -> None:
+    async def maybe_refresh(
+        self,
+        progress_callback: Optional[callable] = None,
+    ) -> None:
         if not self.settings.refresh.enabled:
             return
 
@@ -351,10 +357,10 @@ class ProjectManager:
 
         if self.settings.refresh.refresh_all_repos:
             logger.debug("Auto-refreshing all associated repositories...")
-            await self.refresh_all()
+            await self.refresh_all(progress_callback=progress_callback)
         else:
             logger.debug("Auto-refreshing primary repository...")
-            await self.refresh()  # Just refreshes default repo
+            await self.refresh(progress_callback=progress_callback)  # Just refreshes default repo
 
     async def refresh_components(self, scan_result: ScanResult):
         for name, comp in self._components.items():
