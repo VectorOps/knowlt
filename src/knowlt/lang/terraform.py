@@ -62,6 +62,24 @@ class TerraformCodeParser(AbstractCodeParser):
     ) -> List[ParsedNode]:
         t = node.type
 
+        # Punctuation and template-delimiter tokens that tree-sitter-hcl
+        # exposes as standalone nodes. They do not carry semantic meaning
+        # for our model and should be ignored rather than logged as unknown
+        # node types.
+        if t in (
+            "(",
+            ")",
+            "[",
+            "]",
+            ",",
+            ".",
+            "quoted_template_start",
+            "quoted_template_end",
+            "template_interpolation_start",
+            "template_interpolation_end",
+        ):
+            return []
+
         # Structural containers: just recurse into children; no own node.
         if t in ("config_file", "body"):
             results: List[ParsedNode] = []
@@ -93,8 +111,29 @@ class TerraformCodeParser(AbstractCodeParser):
         if t == "variable_expr":
             return [self._make_node(node, kind=NodeKind.VARIABLE)]
 
-        # Expressions and collections: transparent containers.
+        # Expressions and collections: transparent containers, except for
+        # template expressions, which we treat as single literal leaves.
         if t == "expression":
+            # Template expressions such as "example-sg-${local.env}" are
+            # represented by a mix of template_* tokens under an expression
+            # node. For these, we do not recurse into the internal template
+            # structure and instead emit a single LITERAL node that spans
+            # the whole expression.
+            if any(
+                ch.type
+                in (
+                    "quoted_template_start",
+                    "quoted_template_end",
+                    "template_interpolation_start",
+                    "template_interpolation_end",
+                    "template_literal",
+                    "quoted_template",
+                    "template_expr",
+                )
+                for ch in node.children
+            ):
+                return [self._make_node(node, kind=NodeKind.LITERAL)]
+
             results: List[ParsedNode] = []
             for ch in node.children:
                 results.extend(self._process_node(ch, parent=parent))
