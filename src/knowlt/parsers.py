@@ -181,6 +181,13 @@ class AbstractCodeParser(ABC):
             if nodes:
                 self.parsed_file.nodes.extend(nodes)
             else:
+                # Some handlers intentionally merge multiple syntax nodes into a
+                # single symbol (for example, consecutive `comment` nodes in
+                # Terraform). In those cases it's expected that later nodes in
+                # the merged run produce no symbols, so we skip the warning.
+                if child.type == "comment":
+                    continue
+
                 logger.warning(
                     "Parser handled node but produced no symbols",
                     path=self.parsed_file.path,
