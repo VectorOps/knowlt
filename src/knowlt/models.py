@@ -15,6 +15,7 @@ class ProgrammingLanguage(str, Enum):
     JAVA = "java"
     MARKDOWN = "markdown"
     TEXT = "text"
+    TERRAFORM = "terraform"
 
 
 class NodeKind(str, Enum):
