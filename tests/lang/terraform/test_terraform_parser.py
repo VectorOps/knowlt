@@ -147,6 +147,29 @@ def test_terraform_parser_on_kitchen_sink():
     # Ensure PROPERTY nodes only have nested BLOCK-like children (no literals)
     _assert_property_children_are_blocks_only(parsed_file.nodes)
 
+    # --- Template expression handling ---------------------------------
+
+    # In the aws_security_group.sg resource, the tags attribute contains
+    # an inline object with a templated Name value: "example-sg-${local.env}".
+    tags_prop = _find_property(sg_block, "tags")
+    assert tags_prop is not None
+
+    tags_obj = next(
+        (
+            ch
+            for ch in tags_prop.children
+            if ch.kind == NodeKind.BLOCK and (ch.subtype or "") == "object"
+        ),
+        None,
+    )
+    assert tags_obj is not None
+
+    name_prop = _find_property(tags_obj, "Name")
+    assert name_prop is not None
+    assert name_prop.children == []
+    assert name_prop.header == "Name ="
+    assert 'example-sg-${local.env}' in (name_prop.body or "")
+
     # --- Comment merging assertions -----------------------------------
 
     # 1) Top-of-file kitchen-sink header comments should be merged into 1 node.
