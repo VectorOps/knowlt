@@ -44,7 +44,7 @@ async def include_parents(
         if not parent_ids:
             break
 
-        all_parents = await repo.get_list_by_ids(list(parent_ids))
+        all_parents = await repo.get_by_ids(list(parent_ids))
         parents = {p.id: p for p in all_parents if p.kind != NodeKind.LITERAL}
 
         for s in source:
@@ -93,7 +93,7 @@ async def include_direct_descendants(
     parent_id_set = set(parent_ids)
     result = [s for s in symbols if s.parent_node_id not in parent_id_set]
 
-    result = include_parents(repo, result)
+    result = await include_parents(repo, result)
 
     return result
 

@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from knowlt.project import ProjectManager
 from .base import BaseTool
 from knowlt.summary import SummaryMode
-from knowlt.data_helpers import populate_packages_for_files
+from knowlt.data_helpers import populate_packages_for_files, post_process_search_results
 from knowlt.parsers import (
     CodeParserRegistry,
     AbstractCodeParser,
@@ -129,6 +129,9 @@ class NodeSearchTool(BaseTool):
         )
 
         nodes = await self.pm.data.node.search(query)
+        # Use the node repository for post-processing so that descendant/parent
+        # expansion works correctly.
+        nodes = await post_process_search_results(self.pm.data.node, nodes, final_limit)
 
         file_repo = self.pm.data.file
         package_repo = self.pm.data.package
