@@ -486,6 +486,20 @@ async def test_file_filename_complete(data_repo):
 
 
 @pytest.mark.asyncio
+async def test_file_filename_complete_short_needles_return_empty(data_repo):
+    repo_repo, file_repo = data_repo.repo, data_repo.file
+
+    rid = make_id()
+    await repo_repo.create([Repo(id=rid, name="short", root_path="/tmp/short")])
+
+    f = File(id=make_id(), repo_id=rid, path="src/abc_utils.py")
+    await file_repo.create([f])
+
+    # 1- and 2-character needles should not crash and should return no results
+    assert await file_repo.filename_complete("a") == []
+    assert await file_repo.filename_complete("ab") == []
+
+@pytest.mark.asyncio
 async def test_file_index_sync_on_update(data_repo):
     repo_repo, file_repo = data_repo.repo, data_repo.file
 

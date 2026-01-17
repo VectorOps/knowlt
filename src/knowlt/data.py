@@ -147,7 +147,8 @@ class AbstractFileRepository(AbstractCRUDRepository[File]):
         Parameters
         ----------
         needle:
-            The search string to match (subsequence).
+            The search string to match (subsequence). Needles shorter than 3
+            characters are ignored and return an empty list.
         repo_ids:
             Optional list of repo IDs to restrict the search to. If None, search
             across all repos.
