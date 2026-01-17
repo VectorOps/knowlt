@@ -91,7 +91,10 @@ def _row_to_dict(rel) -> list[dict[str, Any]]:
         return []
 
     columns = [col[0] for col in description]
+
+    logger.info("BEFORE FETCH")
     rows = rel.fetchall()
+    logger.info("AFTER FETCH")
 
     out: list[dict[str, Any]] = []
     for row in rows:
@@ -101,6 +104,8 @@ def _row_to_dict(rel) -> list[dict[str, Any]]:
                 value = None
             d[col] = value
         out.append(d)
+
+    logger.info("PER ROW")
 
     return out
 
@@ -656,7 +661,9 @@ class DuckDBFileRepo(_DuckDBBaseRepo[File], data.AbstractFileRepository):
         boost_repo_id: Optional[ModelId] = None,
         repo_boost_factor: float = 1.2,
     ) -> list[File]:
-        if not needle:
+        # Very short needles are too broad and currently cause issues in the
+        # underlying query construction; treat them as no-op.
+        if not needle or len(needle) < 3:
             return []
         if repo_ids is not None and len(repo_ids) == 0:
             return []
