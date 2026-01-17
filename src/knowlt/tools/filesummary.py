@@ -7,6 +7,7 @@ from knowlt.summary import FileSummary, SummaryMode, build_file_summary
 
 from knowlt.settings import ToolOutput
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from knowlt.project import ProjectManager
 from knowlt.models import Visibility

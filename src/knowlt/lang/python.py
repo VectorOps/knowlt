@@ -276,7 +276,27 @@ class PythonCodeParser(AbstractCodeParser):
             docstring=doc,
         )
         block = next((c for c in node.children if c.type == "block"), None)
-        body_children = block.children if block is not None else node.children
+        if block is not None:
+            body_children: List[ts.Node] = list(block.children)
+            if doc is not None:
+                # Skip the leading literal node that corresponds to the class
+                # docstring; the docstring is already stored on the class node.
+                idx = 0
+                for ch in body_children:
+                    if ch.type == "comment":
+                        idx += 1
+                        continue
+                    if (
+                        ch.type == "expression_statement"
+                        and ch.children
+                        and ch.children[0].type == "string"
+                    ) or ch.type == "string":
+                        idx += 1
+                    # Stop after the first non-comment child, as in _extract_docstring
+                    break
+                body_children = body_children[idx:]
+        else:
+            body_children = node.children
 
         for child in body_children:
             cls.children.extend(self._process_node(child, parent=cls))

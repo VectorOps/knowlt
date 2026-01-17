@@ -92,6 +92,14 @@ class Foobar(Foo, Bar, Buzz):
     pass
 
 
+class OutcomeStrategy(str, Enum):
+    """
+    Node outcome strategy. Either a marker in the output (TAG) or an expected function call (FUNCTION)
+    """
+
+    TAG = "tag"
+    FUNCTION = "function"
+
 d()
 
 if __name__ == "__main__":
