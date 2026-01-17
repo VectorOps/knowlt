@@ -93,3 +93,51 @@ async def test_get_node_summary_include_parents_for_async_method():
         ]
     )
     assert summary == expected
+
+
+@pytest.mark.asyncio
+async def test_class_docstring_not_duplicated_in_summary():
+    # Initialize project and scan samples directory
+    project = await init_project(
+        ProjectSettings(
+            project_name="test",
+            repo_name="test",
+            repo_path=str(SAMPLES_DIR),
+        )
+    )
+
+    # Fetch all nodes and resolve hierarchy
+    nodes = await project.data.node.get_list(
+        NodeFilter(repo_ids=[project.default_repo.id])
+    )
+    assert nodes, "No nodes found in repository"
+    resolve_node_hierarchy(nodes)
+
+    # Locate class with a docstring
+    outcome_cls = next(
+        (
+            n
+            for n in nodes
+            if n.kind == NodeKind.CLASS and n.name == "OutcomeStrategy"
+        ),
+        None,
+    )
+    assert outcome_cls is not None, "Class 'OutcomeStrategy' not found"
+
+    helper = CodeParserRegistry.get_helper(ProgrammingLanguage.PYTHON)
+    assert helper is not None, "Python language helper not registered"
+
+    summary = helper.get_node_summary(outcome_cls, include_docs=True)
+
+    doc_line = (
+        "Node outcome strategy. Either a marker in the output (TAG) or an "
+        "expected function call (FUNCTION)"
+    )
+
+    # Docstring text should appear exactly once in the summary
+    assert doc_line in summary
+    assert summary.count(doc_line) == 1
+
+    # Class body constants should still be present
+    assert 'TAG = "tag"' in summary
+    assert 'FUNCTION = "function"' in summary

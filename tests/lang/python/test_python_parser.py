@@ -67,8 +67,15 @@ def test_python_parser_on_simple_file():
     top_level = symbols_to_map(parsed_file.nodes)
 
     expected_top_level_names = {
-        "fn", "_foo", "decorated", "double_decorated",
-        "ellipsis_fn", "async_fn", "Test", "Foobar",
+        "fn",
+        "_foo",
+        "decorated",
+        "double_decorated",
+        "ellipsis_fn",
+        "async_fn",
+        "Test",
+        "Foobar",
+        "OutcomeStrategy",
     }
     assert set(top_level.keys()) == expected_top_level_names
 

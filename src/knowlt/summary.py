@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from knowlt.logger import logger
 from knowlt.parsers import CodeParserRegistry, AbstractLanguageHelper
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from knowlt.project import ProjectManager
 from knowlt.models import ImportEdge, Visibility, Node, NodeKind, Repo
@@ -25,10 +26,6 @@ class FileSummary(BaseModel):
 
     path: str = Field(..., description="The project-relative path of the file.")
     content: str = Field(..., description="The generated summary content of the file.")
-    summary_mode: SummaryMode = Field(
-        ...,
-        description="Summary granularity used to produce the content. One of: 'definition', 'documentation', or 'source'.",
-    )
 
 
 async def build_file_summary(
@@ -103,5 +100,4 @@ async def build_file_summary(
     return FileSummary(
         path=rel_path,
         content="\n".join(s for s in sections if s),
-        summary_mode=summary_mode,
     )
