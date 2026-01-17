@@ -1,6 +1,5 @@
 from pathlib import Path
 from typing import Dict, Any
-import uuid
 import pytest
 from knowlt.stores.duckdb import DuckDBDataRepository
 from knowlt.models import (
@@ -18,10 +17,11 @@ from knowlt.data import (
     NodeFilter,
     ImportEdgeFilter,
 )
+from knowlt.helpers import generate_id
 
 
 def make_id() -> str:
-    return str(uuid.uuid4())
+    return generate_id()
 
 
 @pytest.fixture(params=[DuckDBDataRepository])

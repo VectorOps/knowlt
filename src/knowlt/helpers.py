@@ -95,9 +95,37 @@ def matches_gitignore(path: str | Path, spec: "pathspec.PathSpec") -> bool:
     return spec.match_file(str(path))
 
 
+_BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+
+def _uuid_to_base58(u: uuid.UUID) -> str:
+    """
+    Encode a 128-bit UUID into a compact, URL-safe Base58 string.
+
+    We left-pad with the first alphabet character to produce a fixed
+    22-character representation, which is sufficient for 128 bits.
+    """
+    num = u.int
+    if num == 0:
+        return _BASE58_ALPHABET[0]
+
+    chars: list[str] = []
+    base = len(_BASE58_ALPHABET)
+    while num > 0:
+        num, rem = divmod(num, base)
+        chars.append(_BASE58_ALPHABET[rem])
+
+    encoded = "".join(reversed(chars))
+    # 58^21 < 2^128 <= 58^22, so 22 Base58 chars cover the space.
+    if len(encoded) < 22:
+        encoded = _BASE58_ALPHABET[0] * (22 - len(encoded)) + encoded
+    return encoded
+
+
 def generate_id() -> str:
     """
-    Return a new unique identifier as a string.
-    Centralised helper so code never calls ``uuid.uuid4`` directly.
+    Return a new unique identifier as a compact, URL-safe string.
+
+    Encodes a random UUID4 using a fixed-length Base58 alphabet.
     """
-    return str(uuid.uuid4())
+    return _uuid_to_base58(uuid.uuid4())

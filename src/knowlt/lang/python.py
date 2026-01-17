@@ -650,6 +650,7 @@ class PythonLanguageHelper(AbstractLanguageHelper):
         body = (sym.body or "").strip()
         if body:
             lines.append(f"{IND}{body}")
+
         return "\n".join(lines)
 
     def get_common_syntax_words(self) -> set[str]:
