@@ -1,7 +1,6 @@
 import threading
 import os
 import duckdb
-import pandas as pd
 import math
 import re
 import asyncio
@@ -75,24 +74,35 @@ class Glob(Criterion):
 # Helpers
 def _row_to_dict(rel) -> list[dict[str, Any]]:
     """
-    Convert a DuckDB relation to List[Dict] via a pandas DataFrame.
-    Using DataFrame avoids the manual column-name handling and is faster.
+    Convert a DuckDB DB-API cursor (DuckDBPyConnection after .execute)
+    into List[Dict] without using pandas.
+
+    - Uses rel.description for column names.
+    - Uses rel.fetchall() to get rows as tuples.
+    - Normalizes scalar float NaN to None; DuckDB already returns
+      SQL NULL as None for most types.
     """
-    df = rel.df()
-    records = df.to_dict(orient="records")  # [] when df is empty
-    for row in records:
-        for k, v in row.items():
-            # convert scalar NaN / pandas.NA to None, but skip sequences/arrays
-            if isinstance(v, float) and math.isnan(v):
-                row[k] = None
-                continue
-            try:
-                is_na = pd.isna(v)  # may return array for sequences
-            except Exception:
-                is_na = False
-            if isinstance(is_na, bool) and is_na:
-                row[k] = None
-    return records
+    if rel is None:
+        return []
+
+    # DB-API cursor metadata: sequence of 7-item tuples, first element is column name.
+    description = rel.description
+    if not description:
+        return []
+
+    columns = [col[0] for col in description]
+    rows = rel.fetchall()
+
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        d: dict[str, Any] = {}
+        for col, value in zip(columns, row):
+            if isinstance(value, float) and math.isnan(value):
+                value = None
+            d[col] = value
+        out.append(d)
+
+    return out
 
 
 # TODO: Rewrite and batch all operations
@@ -262,6 +272,7 @@ class _DuckDBBaseRepo(BaseSQLRepository[T]):
         q = Query.from_(self._table).select("*").where(self._table.id.isin(item_ids))
         rows = await self._execute(q)
         return [self.model(**self._deserialize_data(r)) for r in rows]
+
     async def create(self, items: list[T]) -> list[T]:
         if not items:
             return []
@@ -356,6 +367,7 @@ class DuckDBProjectRepoRepo(data.AbstractProjectRepoRepository):
             # This can happen if the repo is already associated with the project,
             # which is fine.
             pass
+
     async def delete_by_repo_id(self, repo_id: ModelId) -> None:
         """
         Remove all project-repo mapping rows for the given repo_id.
@@ -385,7 +397,6 @@ class DuckDBRepoRepo(_DuckDBBaseRepo[Repo], data.AbstractRepoRepository):
         )
         rows = await self._execute(q)
         return self.model(**self._deserialize_data(rows[0])) if rows else None
-
 
     async def delete(self, item_ids: list[ModelId]) -> bool:
         """
@@ -587,9 +598,7 @@ class DuckDBFileRepo(_DuckDBBaseRepo[File], data.AbstractFileRepository):
         # If a boost_repo_id is provided, prioritize that repo in ordering.
         if flt.boost_repo_id:
             repo_priority = (
-                Case()
-                .when(self._table.repo_id == flt.boost_repo_id, 0)
-                .else_(1)
+                Case().when(self._table.repo_id == flt.boost_repo_id, 0).else_(1)
             )
             q = q.orderby(repo_priority, order=Order.asc).orderby(self._table.path)
         else:
@@ -627,9 +636,7 @@ class DuckDBFileRepo(_DuckDBBaseRepo[File], data.AbstractFileRepository):
         # If a boost_repo_id is provided, prioritize that repo in ordering.
         if boost_repo_id:
             repo_priority = (
-                Case()
-                .when(self._table.repo_id == boost_repo_id, 0)
-                .else_(1)
+                Case().when(self._table.repo_id == boost_repo_id, 0).else_(1)
             )
             q = q.orderby(repo_priority, order=Order.asc).orderby(self._table.path)
         else:
@@ -981,9 +988,7 @@ class DuckDBNodeRepo(_DuckDBBaseRepo[Node], data.AbstractNodeRepository):
             # If a boost_repo_id is provided, prioritize that repo in ordering.
             if query.boost_repo_id:
                 repo_priority = (
-                    Case()
-                    .when(self._table.repo_id == query.boost_repo_id, 0)
-                    .else_(1)
+                    Case().when(self._table.repo_id == query.boost_repo_id, 0).else_(1)
                 )
                 q = q.orderby(repo_priority, order=Order.asc).orderby(self._table.name)
             else:
