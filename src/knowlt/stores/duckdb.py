@@ -103,8 +103,6 @@ def _row_to_dict(rel) -> list[dict[str, Any]]:
             d[col] = value
         out.append(d)
 
-    logger.info("PER ROW")
-
     return out
 
 
