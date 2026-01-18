@@ -92,9 +92,7 @@ def _row_to_dict(rel) -> list[dict[str, Any]]:
 
     columns = [col[0] for col in description]
 
-    logger.info("BEFORE FETCH")
     rows = rel.fetchall()
-    logger.info("AFTER FETCH")
 
     out: list[dict[str, Any]] = []
     for row in rows:
