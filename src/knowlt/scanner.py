@@ -297,112 +297,123 @@ async def scan_repo(
 
     logger.debug("number of workers", count=num_workers)
 
-    # Pre-fetch existing file metadata for change detection
-    rel_paths = [str(p.relative_to(root)) for p in filtered_files]
-    existing_list = (
-        await pm.data.file.get_by_paths(repo.id, rel_paths) if rel_paths else []
-    )
-    existing_by_path: dict[str, File] = {f.path: f for f in existing_list}
+    total_files = len(filtered_files)
 
     loop = asyncio.get_running_loop()
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        tasks: list[asyncio.Future] = []
-        for path in filtered_files:
-            rel_path = path.relative_to(root)
-            processed_paths.add(str(rel_path))
-            params = ProcessFileParams(
-                pm=pm,
-                repo=repo,
-                path=path,
-                root=root,
-                gitignore=gitignore,
-                cache=cache,
-                parser_map=parser_map,
-                existing_meta=existing_by_path.get(str(rel_path)),
-            )
-            tasks.append(loop.run_in_executor(executor, _process_file, params))
-
-        total_tasks = len(tasks)
         processed = 0
         idx = 0
-        async for future in _iter_as_completed(tasks):
-            idx += 1
-            if (idx + 1) % 100 == 0:
-                logger.debug("processing...", num=idx + 1, total=total_tasks)
 
-            res: ProcessFileResult = await future
-            processed += 1
-            if progress_callback and (processed % 100 == 0):
-                try:
-                    progress_callback(
-                        ScanProgress(
-                            repo_id=repo.id,
-                            total_files=total_tasks,
-                            processed_files=processed,
-                            files_added=len(result.files_added),
-                            files_updated=len(result.files_updated),
-                            files_deleted=len(result.files_deleted),
-                            elapsed_seconds=time.perf_counter() - start_time,
-                        )
-                    )
-                except Exception as cb_exc:
-                    logger.error("Progress callback failed", exc=cb_exc)
-
-            if res.status == ProcessFileStatus.SKIPPED:
+        # Process files in batches to limit metadata queries and task scheduling.
+        for batch_start in range(0, total_files, FILE_BATCH_SIZE):
+            batch_files = filtered_files[batch_start : batch_start + FILE_BATCH_SIZE]
+            if not batch_files:
                 continue
 
-            # Update timing stats for all processed files (error, bare, parsed)
-            timing_stats[res.suffix]["count"] += 1
-            timing_stats[res.suffix]["total_time"] += res.duration
+            # Fetch existing file metadata for this batch only
+            batch_rel_paths = [str(p.relative_to(root)) for p in batch_files]
+            existing_list = await pm.data.file.get_by_paths(
+                repo.id, batch_rel_paths
+            ) if batch_rel_paths else []
+            existing_by_path: dict[str, File] = {f.path: f for f in existing_list}
 
-            if res.status == ProcessFileStatus.ERROR:
-                logger.error(
-                    "Failed to parse file", path=res.rel_path, exc=res.exception
+            tasks: list[asyncio.Future] = []
+            for path in batch_files:
+                rel_path = path.relative_to(root)
+                rel_path_str = str(rel_path)
+                processed_paths.add(rel_path_str)
+                params = ProcessFileParams(
+                    pm=pm,
+                    repo=repo,
+                    path=path,
+                    root=root,
+                    gitignore=gitignore,
+                    cache=cache,
+                    parser_map=parser_map,
+                    existing_meta=existing_by_path.get(rel_path_str),
                 )
-                continue
+                tasks.append(loop.run_in_executor(executor, _process_file, params))
 
-            if res.status == ProcessFileStatus.BARE_FILE:
-                assert res.rel_path is not None
-                logger.debug(
-                    "No parser registered for path – storing bare File.",
-                    path=res.rel_path,
-                )
-                if res.existing_meta is None:
-                    assert res.file_hash is not None
-                    assert res.mod_time is not None
-                    fm = File(
-                        id=generate_id(),
-                        repo_id=repo.id,
-                        package_id=None,
-                        path=res.rel_path,
-                        file_hash=res.file_hash,
-                        last_updated=res.mod_time,
+            async for future in _iter_as_completed(tasks):
+                idx += 1
+                if idx % FILE_BATCH_SIZE == 0:
+                    logger.debug(
+                        "processing...", num=idx, total=total_files
                     )
-                    await pm.data.file.create([fm])
-                    result.files_added.append(res.rel_path)
-                else:
-                    await pm.data.file.update(
-                        [
-                            (
-                                res.existing_meta.id,
-                                {
-                                    "file_hash": res.file_hash,
-                                    "last_updated": res.mod_time,
-                                },
+
+                res: ProcessFileResult = await future
+                processed += 1
+                if progress_callback and (processed % FILE_BATCH_SIZE == 0):
+                    try:
+                        progress_callback(
+                            ScanProgress(
+                                repo_id=repo.id,
+                                total_files=total_files,
+                                processed_files=processed,
+                                files_added=len(result.files_added),
+                                files_updated=len(result.files_updated),
+                                files_deleted=len(result.files_deleted),
+                                elapsed_seconds=time.perf_counter() - start_time,
                             )
-                        ]
-                    )
-                    result.files_updated.append(res.rel_path)
+                        )
+                    except Exception as cb_exc:
+                        logger.error("Progress callback failed", exc=cb_exc)
 
-            elif res.status == ProcessFileStatus.PARSED_FILE:
-                assert res.parsed_file is not None
-                await upsert_parsed_file(
-                    pm, repo, state, res.parsed_file, upsert_timing_stats
-                )
-                if res.existing_meta is None:
-                    result.files_added.append(res.parsed_file.path)
-                else:
-                    result.files_updated.append(res.parsed_file.path)
+                if res.status == ProcessFileStatus.SKIPPED:
+                    continue
+
+                # Update timing stats for all processed files (error, bare, parsed)
+                timing_stats[res.suffix]["count"] += 1
+                timing_stats[res.suffix]["total_time"] += res.duration
+
+                if res.status == ProcessFileStatus.ERROR:
+                    logger.error(
+                        "Failed to parse file", path=res.rel_path, exc=res.exception
+                    )
+                    continue
+
+                if res.status == ProcessFileStatus.BARE_FILE:
+                    assert res.rel_path is not None
+                    logger.debug(
+                        "No parser registered for path – storing bare File.",
+                        path=res.rel_path,
+                    )
+                    if res.existing_meta is None:
+                        assert res.file_hash is not None
+                        assert res.mod_time is not None
+                        fm = File(
+                            id=generate_id(),
+                            repo_id=repo.id,
+                            package_id=None,
+                            path=res.rel_path,
+                            file_hash=res.file_hash,
+                            last_updated=res.mod_time,
+                        )
+                        await pm.data.file.create([fm])
+                        result.files_added.append(res.rel_path)
+                    else:
+                        await pm.data.file.update(
+                            [
+                                (
+                                    res.existing_meta.id,
+                                    {
+                                        "file_hash": res.file_hash,
+                                        "last_updated": res.mod_time,
+                                    },
+                                )
+                            ]
+                        )
+                        result.files_updated.append(res.rel_path)
+
+                elif res.status == ProcessFileStatus.PARSED_FILE:
+                    assert res.parsed_file is not None
+                    await upsert_parsed_file(
+                        pm, repo, state, res.parsed_file, upsert_timing_stats
+                    )
+                    if res.existing_meta is None:
+                        result.files_added.append(res.parsed_file.path)
+                    else:
+                        result.files_updated.append(res.parsed_file.path)
 
     # Remove stale metadata for files that have disappeared from disk.
     # Only perform this check on a full scan (when `paths` is not provided).

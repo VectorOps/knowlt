@@ -16,8 +16,6 @@ from knowlt.embeddings import EmbeddingWorker
 from knowlt.tools import ToolRegistry, BaseTool
 
 
-
-
 @dataclass
 class ScanResult:
     """Result object returned by `scan_project_directory`."""
@@ -99,6 +97,7 @@ class ProjectManager:
             raise ValueError(f"settings.project_name is required.")
         if not self.settings.repo_name:
             raise ValueError(f"settings.repo_name is required.")
+
     def _cache_repo(self, repo: Repo) -> Repo:
         """
         Store *repo* in all local repo caches and return it.
@@ -129,6 +128,7 @@ class ProjectManager:
         if repo is not None:
             self._cache_repo(repo)
         return repo
+
     @classmethod
     async def create(
         self,
@@ -360,7 +360,9 @@ class ProjectManager:
             await self.refresh_all(progress_callback=progress_callback)
         else:
             logger.debug("Auto-refreshing primary repository...")
-            await self.refresh(progress_callback=progress_callback)  # Just refreshes default repo
+            await self.refresh(
+                progress_callback=progress_callback
+            )  # Just refreshes default repo
 
     async def refresh_components(self, scan_result: ScanResult):
         for name, comp in self._components.items():
