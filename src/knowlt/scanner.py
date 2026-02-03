@@ -38,6 +38,9 @@ from knowlt.embedding_helpers import (
 )
 
 
+FILE_BATCH_SIZE = 100
+
+
 class ScanProgress(BaseModel):
     repo_id: str
     total_files: int
@@ -84,6 +87,63 @@ class ProcessFileParams:
     cache: ProjectCache
     parser_map: dict[str, Type[AbstractCodeParser]]
     existing_meta: Optional[File] = None
+
+
+def _find_gitignore_paths(root: Path) -> set[Path]:
+    """Collect all .gitignore files under *root* using blocking rglob.
+
+    This helper is intended to be run in a worker thread to avoid blocking the
+    main asyncio event loop.
+    """
+    gitignore_paths: set[Path] = set()
+    root_gitignore = root / ".gitignore"
+    if root_gitignore.exists():
+        gitignore_paths.add(root_gitignore)
+    for gi in root.rglob(".gitignore"):
+        gitignore_paths.add(gi)
+    return gitignore_paths
+
+
+def _collect_filtered_files(
+    root: Path,
+    gitignore: "pathspec.PathSpec",
+    ignored_dirs: set[str],
+    paths: Optional[list[str]] = None,
+) -> list[Path]:
+    """Collect and pre-filter files under *root*.
+
+    This performs filesystem traversal and filtering in a blocking manner and is
+    intended to be run in a worker thread to avoid blocking the asyncio event loop.
+    """
+
+    if paths:
+        all_files = [root / p for p in paths]
+    else:
+        all_files = list(root.rglob("*"))
+
+    filtered_files: list[Path] = []
+    for path in all_files:
+        try:
+            rel_path = path.relative_to(root)
+        except Exception:
+            # Skip paths outside root (defensive)
+            continue
+
+        # Only files
+        if not path.is_file():
+            continue
+
+        # Skip .gitignore matches
+        if gitignore.match_file(str(rel_path)):
+            continue
+
+        # Skip ignored directories by settings
+        if any(part in ignored_dirs for part in rel_path.parts):
+            continue
+
+        filtered_files.append(path)
+
+    return filtered_files
 
 
 def _get_parser_map(pm: ProjectManager) -> dict[str, Type[AbstractCodeParser]]:
@@ -208,12 +268,8 @@ async def scan_repo(
 
     # Collect ignore patterns from all .gitignore files (combined)
     combined_spec = pathspec.PathSpec.from_lines("gitwildmatch", [])
-    gitignore_paths: set[Path] = set()
-    root_gitignore = root / ".gitignore"
-    if root_gitignore.exists():
-        gitignore_paths.add(root_gitignore)
-    for gi in root.rglob(".gitignore"):
-        gitignore_paths.add(gi)
+    # Run filesystem globbing in a worker thread to avoid blocking the event loop
+    gitignore_paths: set[Path] = await asyncio.to_thread(_find_gitignore_paths, root)
     for gi_path in sorted(gitignore_paths):
         try:
             combined_spec = combined_spec + parse_gitignore(gi_path, root_dir=root)
@@ -221,29 +277,12 @@ async def scan_repo(
             logger.warning("Failed to parse .gitignore", path=str(gi_path), exc=exc)
     gitignore = combined_spec
 
-    if paths:
-        all_files = [root / p for p in paths]
-    else:
-        all_files = list(root.rglob("*"))
+    ignored_dirs = set(pm.settings.ignored_dirs)
 
-    # Prefilter against .gitignore and ignored directories before scheduling work
-    filtered_files: list[Path] = []
-    for path in all_files:
-        try:
-            rel_path = path.relative_to(root)
-        except Exception:
-            # Skip paths outside root (shouldn't happen, but defensive)
-            continue
-        # Only files
-        if not path.is_file():
-            continue
-        # Skip .gitignore matches
-        if gitignore.match_file(str(rel_path)):
-            continue
-        # Skip ignored directories by settings
-        if any(part in pm.settings.ignored_dirs for part in rel_path.parts):
-            continue
-        filtered_files.append(path)
+    # Collect and pre-filter files in a worker thread to avoid blocking the event loop
+    filtered_files: list[Path] = await asyncio.to_thread(
+        _collect_filtered_files, root, gitignore, ignored_dirs, paths
+    )
 
     num_workers = pm.settings.scanner_num_workers
     if num_workers is None:
