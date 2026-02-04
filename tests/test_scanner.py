@@ -1,5 +1,6 @@
 from pathlib import Path
 import pytest
+import asyncio
 
 from knowlt.project import ProjectManager, ProjectCache
 from knowlt.settings import ProjectSettings
@@ -204,3 +205,69 @@ async def test_nested_gitignore_skips_files(tmp_path: Path):
     # ignored by nested .gitignore
     assert "pkg/ignoreme.py" not in paths
     assert "pkg/sub/deeper/ignoreme.py" not in paths
+
+
+@pytest.mark.asyncio
+async def test_scan_repo_last_scanned_and_skip_unmodified(tmp_path: Path):
+    """
+    Verify that scan_repo:
+      - persists repo.last_scanned,
+      - updates File.last_updated on change,
+      - and skips unchanged files in subsequent scans.
+    """
+    repo_dir = tmp_path / "repo_last_scanned"
+    repo_dir.mkdir()
+    file_path = repo_dir / "file.txt"
+    file_path.write_text("v1")
+
+    pm = await _make_project(repo_dir)
+
+    # Before any scan, last_scanned should be unset.
+    assert pm.default_repo.last_scanned is None
+
+    # 1) First scan: file is new -> added, last_scanned persisted.
+    result1 = await scan_repo(pm, pm.default_repo)
+    assert "file.txt" in result1.files_added
+
+    rs = pm.data
+    repo_id = pm.default_repo.id
+
+    repo_meta1 = (await rs.repo.get_by_ids([repo_id]))[0]
+    assert repo_meta1.last_scanned is not None
+
+    files1 = await rs.file.get_list(FileFilter(repo_ids=[repo_id]))
+    assert len(files1) == 1
+    file_meta1 = files1[0]
+    assert file_meta1.last_updated is not None
+    assert file_meta1.last_updated == file_path.stat().st_mtime_ns
+
+    first_last_scanned = repo_meta1.last_scanned
+    first_last_updated = file_meta1.last_updated
+
+    # 2) Modify file so its mtime increases and rescan -> updated.
+    await asyncio.sleep(0.01)
+    file_path.write_text("v2")
+
+    result2 = await scan_repo(pm, pm.default_repo)
+    assert "file.txt" in result2.files_updated
+    assert "file.txt" not in result2.files_added
+
+    repo_meta2 = (await rs.repo.get_by_ids([repo_id]))[0]
+    assert repo_meta2.last_scanned is not None
+    assert repo_meta2.last_scanned > first_last_scanned
+
+    file_meta2 = (await rs.file.get_list(FileFilter(repo_ids=[repo_id])))[0]
+    assert file_meta2.last_updated is not None
+    assert file_meta2.last_updated > first_last_updated
+
+    # 3) Third scan without changes -> file should be skipped by workers.
+    result3 = await scan_repo(pm, pm.default_repo)
+    assert "file.txt" not in result3.files_updated
+    assert "file.txt" not in result3.files_added
+
+    file_meta3 = (await rs.file.get_list(FileFilter(repo_ids=[repo_id])))[0]
+    assert file_meta3.last_updated == file_meta2.last_updated
+
+    repo_meta3 = (await rs.repo.get_by_ids([repo_id]))[0]
+    assert repo_meta3.last_scanned is not None
+    assert repo_meta3.last_scanned >= repo_meta2.last_scanned

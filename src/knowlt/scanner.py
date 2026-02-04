@@ -89,6 +89,12 @@ class ProcessFileParams:
     existing_meta: Optional[File] = None
 
 
+@dataclass
+class FileScanCandidate:
+    path: Path
+    maybe_changed: bool
+
+
 def _find_gitignore_paths(root: Path) -> set[Path]:
     """Collect all .gitignore files under *root* using blocking rglob.
 
@@ -108,20 +114,20 @@ def _collect_filtered_files(
     root: Path,
     gitignore: "pathspec.PathSpec",
     ignored_dirs: set[str],
+    last_scanned: Optional[int],
     paths: Optional[list[str]] = None,
-) -> list[Path]:
+) -> list[FileScanCandidate]:
     """Collect and pre-filter files under *root*.
 
-    This performs filesystem traversal and filtering in a blocking manner and is
-    intended to be run in a worker thread to avoid blocking the asyncio event loop.
+    Returns FileScanCandidate objects where maybe_changed is True if the file's
+    modification time is strictly greater than last_scanned (or last_scanned is None).
     """
-
     if paths:
         all_files = [root / p for p in paths]
     else:
         all_files = list(root.rglob("*"))
 
-    filtered_files: list[Path] = []
+    filtered_files: list[FileScanCandidate] = []
     for path in all_files:
         try:
             rel_path = path.relative_to(root)
@@ -129,19 +135,23 @@ def _collect_filtered_files(
             # Skip paths outside root (defensive)
             continue
 
-        # Only files
         if not path.is_file():
             continue
 
-        # Skip .gitignore matches
         if gitignore.match_file(str(rel_path)):
             continue
 
-        # Skip ignored directories by settings
         if any(part in ignored_dirs for part in rel_path.parts):
             continue
 
-        filtered_files.append(path)
+        try:
+            mod_time = path.stat().st_mtime_ns
+        except OSError:
+            maybe_changed = False
+        else:
+            maybe_changed = last_scanned is None or mod_time > last_scanned
+
+        filtered_files.append(FileScanCandidate(path=path, maybe_changed=maybe_changed))
 
     return filtered_files
 
@@ -187,7 +197,11 @@ def _process_file(
             )
 
         mod_time = p.path.stat().st_mtime_ns
-        if p.existing_meta and p.existing_meta.last_updated == mod_time:
+        if (
+            p.existing_meta
+            and p.existing_meta.last_updated is not None
+            and p.existing_meta.last_updated >= mod_time
+        ):
             duration = time.perf_counter() - file_proc_start
             return ProcessFileResult(
                 status=ProcessFileStatus.SKIPPED, duration=duration, suffix=suffix
@@ -279,9 +293,14 @@ async def scan_repo(
 
     ignored_dirs = set(pm.settings.ignored_dirs)
 
+    # previous scan time, used to detect potentially changed files
+    previous_last_scanned: Optional[int] = repo.last_scanned
+    # timestamp to persist for this scan
+    scan_started_at: int = time.time_ns()
+
     # Collect and pre-filter files in a worker thread to avoid blocking the event loop
-    filtered_files: list[Path] = await asyncio.to_thread(
-        _collect_filtered_files, root, gitignore, ignored_dirs, paths
+    filtered_files: list[FileScanCandidate] = await asyncio.to_thread(
+        _collect_filtered_files, root, gitignore, ignored_dirs, previous_last_scanned, paths
     )
 
     num_workers = pm.settings.scanner_num_workers
@@ -303,25 +322,38 @@ async def scan_repo(
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         processed = 0
         idx = 0
-
         # Process files in batches to limit metadata queries and task scheduling.
         for batch_start in range(0, total_files, FILE_BATCH_SIZE):
-            batch_files = filtered_files[batch_start : batch_start + FILE_BATCH_SIZE]
-            if not batch_files:
+            batch_candidates = filtered_files[batch_start : batch_start + FILE_BATCH_SIZE]
+            if not batch_candidates:
                 continue
 
-            # Fetch existing file metadata for this batch only
-            batch_rel_paths = [str(p.relative_to(root)) for p in batch_files]
-            existing_list = await pm.data.file.get_by_paths(
-                repo.id, batch_rel_paths
-            ) if batch_rel_paths else []
+            # Deletion detection: record all discovered paths in this batch,
+            # regardless of whether they may have changed.
+            for cand in batch_candidates:
+                rel_path = cand.path.relative_to(root)
+                rel_path_str = str(rel_path)
+                processed_paths.add(rel_path_str)
+
+            # Pre-processing step: keep only files that may have changed since last scan.
+            changed_candidates = [cand for cand in batch_candidates if cand.maybe_changed]
+            if not changed_candidates:
+                # Nothing to process in this batch.
+                continue
+
+            batch_rel_paths = [str(c.path.relative_to(root)) for c in changed_candidates]
+            existing_list = (
+                await pm.data.file.get_by_paths(repo.id, batch_rel_paths)
+                if batch_rel_paths
+                else []
+            )
             existing_by_path: dict[str, File] = {f.path: f for f in existing_list}
 
             tasks: list[asyncio.Future] = []
-            for path in batch_files:
+            for cand in changed_candidates:
+                path = cand.path
                 rel_path = path.relative_to(root)
                 rel_path_str = str(rel_path)
-                processed_paths.add(rel_path_str)
                 params = ProcessFileParams(
                     pm=pm,
                     repo=repo,
@@ -337,9 +369,7 @@ async def scan_repo(
             async for future in _iter_as_completed(tasks):
                 idx += 1
                 if idx % FILE_BATCH_SIZE == 0:
-                    logger.debug(
-                        "processing...", num=idx, total=total_files
-                    )
+                    logger.debug("processing...", num=idx, total=total_files)
 
                 res: ProcessFileResult = await future
                 processed += 1
@@ -506,6 +536,17 @@ async def scan_repo(
                             f"Avg: {avg_time_ms:>8.2f} ms/file | "
                             f"Percentage: {percentage:.2f}%"
                         )
+    # Persist last_scanned for this repo based on the scan start timestamp.
+    try:
+        await pm.data.repo.update([(repo.id, {"last_scanned": scan_started_at})])
+        # Keep the in-memory repo instance (and ProjectManager caches) in sync.
+        repo.last_scanned = scan_started_at
+    except Exception as exc:
+        logger.error(
+            "Failed to update repo.last_scanned",
+            repo_id=repo.id,
+            exc=exc,
+        )
 
     return result
 
