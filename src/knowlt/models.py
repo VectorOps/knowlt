@@ -82,6 +82,7 @@ class Repo(BaseModel):
     remote_url: Optional[str] = None
     default_branch: str = "main"
     description: Optional[str] = None
+    last_scanned: Optional[int] = None  # POSIX timestamp in nanoseconds
 
 
 class Package(BaseModel):
