@@ -12,7 +12,7 @@ import time
 import asyncio
 
 from knowlt.project import ScanResult, ProjectManager, ProjectCache
-from knowlt.helpers import compute_file_hash, generate_id, parse_gitignore
+from knowlt.helpers import compute_file_hash, generate_id
 from knowlt.logger import logger
 from knowlt.models import (
     Repo,
@@ -36,6 +36,7 @@ from knowlt.embedding_helpers import (
     schedule_symbol_embedding,
     SymbolEmbeddingItem,
 )
+from knowlt.pscan import collect_files, PScanResult, FileScanCandidate
 
 
 FILE_BATCH_SIZE = 100
@@ -83,77 +84,9 @@ class ProcessFileParams:
     repo: Repo
     path: Path
     root: Path
-    gitignore: "pathspec.PathSpec"
     cache: ProjectCache
     parser_map: dict[str, Type[AbstractCodeParser]]
     existing_meta: Optional[File] = None
-
-
-@dataclass
-class FileScanCandidate:
-    path: Path
-    maybe_changed: bool
-
-
-def _find_gitignore_paths(root: Path) -> set[Path]:
-    """Collect all .gitignore files under *root* using blocking rglob.
-
-    This helper is intended to be run in a worker thread to avoid blocking the
-    main asyncio event loop.
-    """
-    gitignore_paths: set[Path] = set()
-    root_gitignore = root / ".gitignore"
-    if root_gitignore.exists():
-        gitignore_paths.add(root_gitignore)
-    for gi in root.rglob(".gitignore"):
-        gitignore_paths.add(gi)
-    return gitignore_paths
-
-
-def _collect_filtered_files(
-    root: Path,
-    gitignore: "pathspec.PathSpec",
-    ignored_dirs: set[str],
-    last_scanned: Optional[int],
-    paths: Optional[list[str]] = None,
-) -> list[FileScanCandidate]:
-    """Collect and pre-filter files under *root*.
-
-    Returns FileScanCandidate objects where maybe_changed is True if the file's
-    modification time is strictly greater than last_scanned (or last_scanned is None).
-    """
-    if paths:
-        all_files = [root / p for p in paths]
-    else:
-        all_files = list(root.rglob("*"))
-
-    filtered_files: list[FileScanCandidate] = []
-    for path in all_files:
-        try:
-            rel_path = path.relative_to(root)
-        except Exception:
-            # Skip paths outside root (defensive)
-            continue
-
-        if not path.is_file():
-            continue
-
-        if gitignore.match_file(str(rel_path)):
-            continue
-
-        if any(part in ignored_dirs for part in rel_path.parts):
-            continue
-
-        try:
-            mod_time = path.stat().st_mtime_ns
-        except OSError:
-            maybe_changed = False
-        else:
-            maybe_changed = last_scanned is None or mod_time > last_scanned
-
-        filtered_files.append(FileScanCandidate(path=path, maybe_changed=maybe_changed))
-
-    return filtered_files
 
 
 def _get_parser_map(pm: ProjectManager) -> dict[str, Type[AbstractCodeParser]]:
@@ -189,13 +122,6 @@ def _process_file(
     suffix = p.path.suffix or "no_suffix"
 
     try:
-        # Skip paths ignored by .gitignore
-        if p.gitignore.match_file(str(rel_path_str)):
-            duration = time.perf_counter() - file_proc_start
-            return ProcessFileResult(
-                status=ProcessFileStatus.SKIPPED, duration=duration, suffix=suffix
-            )
-
         mod_time = p.path.stat().st_mtime_ns
         if (
             p.existing_meta
@@ -280,17 +206,6 @@ async def scan_repo(
 
     parser_map = _get_parser_map(pm)
 
-    # Collect ignore patterns from all .gitignore files (combined)
-    combined_spec = pathspec.PathSpec.from_lines("gitwildmatch", [])
-    # Run filesystem globbing in a worker thread to avoid blocking the event loop
-    gitignore_paths: set[Path] = await asyncio.to_thread(_find_gitignore_paths, root)
-    for gi_path in sorted(gitignore_paths):
-        try:
-            combined_spec = combined_spec + parse_gitignore(gi_path, root_dir=root)
-        except Exception as exc:
-            logger.warning("Failed to parse .gitignore", path=str(gi_path), exc=exc)
-    gitignore = combined_spec
-
     ignored_dirs = set(pm.settings.ignored_dirs)
 
     # previous scan time, used to detect potentially changed files
@@ -299,9 +214,11 @@ async def scan_repo(
     scan_started_at: int = time.time_ns()
 
     # Collect and pre-filter files in a worker thread to avoid blocking the event loop
-    filtered_files: list[FileScanCandidate] = await asyncio.to_thread(
-        _collect_filtered_files, root, gitignore, ignored_dirs, previous_last_scanned, paths
+    pscan_result: PScanResult = await asyncio.to_thread(
+        collect_files, root, ignored_dirs, previous_last_scanned, paths
     )
+    filtered_files: list[FileScanCandidate] = pscan_result.candidates
+    processed_paths.update(pscan_result.processed_paths)
 
     num_workers = pm.settings.scanner_num_workers
     if num_workers is None:
@@ -328,13 +245,6 @@ async def scan_repo(
             if not batch_candidates:
                 continue
 
-            # Deletion detection: record all discovered paths in this batch,
-            # regardless of whether they may have changed.
-            for cand in batch_candidates:
-                rel_path = cand.path.relative_to(root)
-                rel_path_str = str(rel_path)
-                processed_paths.add(rel_path_str)
-
             # Pre-processing step: keep only files that may have changed since last scan.
             changed_candidates = [cand for cand in batch_candidates if cand.maybe_changed]
             if not changed_candidates:
@@ -359,7 +269,6 @@ async def scan_repo(
                     repo=repo,
                     path=path,
                     root=root,
-                    gitignore=gitignore,
                     cache=cache,
                     parser_map=parser_map,
                     existing_meta=existing_by_path.get(rel_path_str),
