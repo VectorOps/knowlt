@@ -68,6 +68,15 @@ async def test_execute_nodesearch_skip_mode_returns_list():
         )
         payload = json.loads(out)
         assert isinstance(payload, list)
+        if payload:
+            first = payload[0]
+            # start/end line numbers should be present and 1-based when available
+            assert "start_line" in first
+            assert "end_line" in first
+            assert isinstance(first["start_line"], int)
+            assert isinstance(first["end_line"], int)
+            assert first["start_line"] >= 1
+            assert first["end_line"] >= first["start_line"]
     finally:
         await pm.destroy()
 
