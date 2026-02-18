@@ -64,6 +64,14 @@ class NodeSearchResult(BaseModel):
         default=None,
         description="The summary or body of the symbol, depending on the summary_mode.",
     )
+    start_line: Optional[int] = Field(
+        default=None,
+        description="1-based starting line number of the symbol in the file.",
+    )
+    end_line: Optional[int] = Field(
+        default=None,
+        description="1-based ending line number of the symbol in the file (inclusive).",
+    )
 
 
 class NodeSearchTool(BaseTool):
@@ -177,6 +185,8 @@ class NodeSearchTool(BaseTool):
                     visibility=None,
                     file_path=file_path,
                     body=sym_body,
+                    start_line=s.start_line or None,
+                    end_line=s.end_line or None,
                 )
             )
         return self.encode_output(results)
