@@ -7,7 +7,7 @@
 macro */
 #define SQUARE(x) \
     ((x) * (x))
-int sum(int a, int b)
+int sum(int a, int b);
 static const char *global_name = "knowlt"
 typedef int Size;
 // Person information

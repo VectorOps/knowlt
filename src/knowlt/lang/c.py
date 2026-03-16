@@ -671,6 +671,8 @@ class CLanguageHelper(AbstractLanguageHelper):
             if include_docs and sym.docstring:
                 for ln in sym.docstring.splitlines():
                     lines.append(f"{IND}{ln.strip()}")
+            if subtype in ("signature",) and header and not header.endswith(";"):
+                header = f"{header};"
             if header:
                 for ln in header.splitlines():
                     lines.append(f"{IND}{ln.strip()}")
