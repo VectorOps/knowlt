@@ -1,0 +1,1 @@
+int feature_flag(void);

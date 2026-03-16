@@ -5,7 +5,7 @@ import pytest
 from knowlt.settings import ProjectSettings
 from knowlt import init_project
 from knowlt.summary import build_file_summary, SummaryMode
-from knowlt.lang.c import CCodeParser
+from knowlt.lang.cpp import CppCodeParser
 from knowlt.parsers import CodeParserRegistry
 from knowlt.models import ProgrammingLanguage, NodeKind
 from knowlt.data import NodeFilter
@@ -16,7 +16,7 @@ SAMPLES_DIR = Path(__file__).parent / "samples"
 
 
 @pytest.mark.asyncio
-async def test_build_file_summary_matches_expected_main_c():
+async def test_build_file_summary_matches_expected_main_cpp():
     project = await init_project(
         ProjectSettings(
             project_name="test",
@@ -25,21 +25,21 @@ async def test_build_file_summary_matches_expected_main_c():
         )
     )
 
-    files = await project.data.file.get_by_paths(project.default_repo.id, ["main.c"])
-    assert files, "main.c not found in repository metadata"
+    files = await project.data.file.get_by_paths(project.default_repo.id, ["main.cpp"])
+    assert files, "main.cpp not found in repository metadata"
 
     file_summary = await build_file_summary(
-        project, project.default_repo, "main.c", SummaryMode.Documentation
+        project, project.default_repo, "main.cpp", SummaryMode.Documentation
     )
-    assert file_summary is not None, "Failed to build file summary for main.c"
-    assert file_summary.path == "main.c"
+    assert file_summary is not None, "Failed to build file summary for main.cpp"
+    assert file_summary.path == "main.cpp"
 
-    expected_text = (SAMPLES_DIR / "main.c.summary").read_text(encoding="utf-8")
+    expected_text = (SAMPLES_DIR / "main.cpp.summary").read_text(encoding="utf-8")
     assert file_summary.content.strip() == expected_text.strip()
 
 
 @pytest.mark.asyncio
-async def test_c_function_prototype_summary_does_not_add_body_placeholder():
+async def test_cpp_function_prototype_summary_does_not_add_body_placeholder():
     project = await init_project(
         ProjectSettings(
             project_name="test",
@@ -59,7 +59,7 @@ async def test_c_function_prototype_summary_does_not_add_body_placeholder():
     )
     assert prototype is not None
 
-    helper = CodeParserRegistry.get_helper(ProgrammingLanguage.C)
+    helper = CodeParserRegistry.get_helper(ProgrammingLanguage.CPP)
     assert helper is not None
     summary = helper.get_node_summary(prototype)
 
@@ -67,18 +67,14 @@ async def test_c_function_prototype_summary_does_not_add_body_placeholder():
 
 
 @pytest.mark.asyncio
-async def test_c_summary_keeps_chained_elif_branches(tmp_path: Path):
-    src = """#if defined(FLAG)
-int a(void);
-#elif OTHER
-int b(void);
-#elif THIRD
-int c(void);
-#else
-int d(void);
-#endif
+async def test_cpp_namespace_summary_with_nested_children(tmp_path: Path):
+    src = """namespace outer {
+namespace inner {
+int helper();
+}
+}
 """
-    (tmp_path / "chain.h").write_text(src, encoding="utf-8")
+    (tmp_path / "nested.cpp").write_text(src, encoding="utf-8")
 
     project = await init_project(
         ProjectSettings(
@@ -89,15 +85,11 @@ int d(void);
     )
 
     summary = await build_file_summary(
-        project, project.default_repo, "chain.h", SummaryMode.Documentation
+        project, project.default_repo, "nested.cpp", SummaryMode.Documentation
     )
     assert summary is not None
-    assert summary.content.strip() == """#if defined(FLAG)
-	...
-#elif OTHER
-	...
-#elif THIRD
-	...
-#else
-	...
-#endif""".strip()
+    assert summary.content.strip() == """namespace outer {
+	namespace inner {
+		int helper();
+	}
+}""".strip()
