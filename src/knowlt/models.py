@@ -9,6 +9,7 @@ from typing import List, Optional, Dict, Iterable
 
 class ProgrammingLanguage(str, Enum):
     PYTHON = "python"
+    C = "c"
     GO = "go"
     TYPESCRIPT = "typescript"
     JAVASCRIPT = "javascript"

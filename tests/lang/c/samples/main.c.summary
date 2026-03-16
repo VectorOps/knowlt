@@ -1,0 +1,41 @@
+#include <stdio.h>
+#include "types.h"
+#include "sub/feature.h"
+// Macro constant
+#define VERSION 3
+/* Multi-line
+macro */
+#define SQUARE(x) \
+    ((x) * (x))
+int sum(int a, int b)
+static const char *global_name = "knowlt"
+typedef int Size;
+// Person information
+typedef struct Person {
+	// Unique identifier
+	int id;
+	const char *name;
+}
+enum Color {
+	RED
+	GREEN = 2
+	BLUE
+}
+union Value {
+	int i;
+	float f;
+}
+// Points in 2D space
+struct Point {
+	int x;
+	int y;
+}
+#ifdef ENABLE_FEATURE
+	...
+#else
+	...
+#endif
+// Add two integers
+static int add(int a, int b) {
+	...
+}
