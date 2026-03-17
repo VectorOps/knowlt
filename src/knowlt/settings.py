@@ -315,6 +315,13 @@ class ProjectSettings(BaseSettings):
             "of the built-in parser defaults."
         ),
     )
+    parse_unknown_text_files: bool = Field(
+        default=False,
+        description=(
+            "If True, files without a registered parser that are detected as UTF-8 "
+            "text are parsed with the text parser."
+        ),
+    )
     languages: dict[str, LanguageSettings] = Field(
         default_factory=_get_default_languages,
         description="A dictionary of language-specific settings, keyed by language name.",

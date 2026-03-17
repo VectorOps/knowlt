@@ -1,13 +1,13 @@
 #+title: Know Lite
 * [ ] General
-** [ ] Parse unknown files that are not binary as text
+** [X] Parse unknown files that are not binary as text
 ** [ ] Write data model documentation
 ** [ ] Add a way to initialize project, but only scan and work from a subpath
 ** [ ] Method to fully reparse the repo in project
-** [ ] Add a way to override file mapping. For example, .h might point to C or ObjC parser.
+** [X] Add a way to override file mapping. For example, .h might point to C or ObjC parser.
 * [ ] Performance
 ** [ ] Create partial refresh API
-** [ ] Optimize finding of deleted files
+** [X] Optimize finding of deleted files
 ** [ ] Optimize chunker to tokenize and then de-tokenize to generate result, as an optimization?
 ** [ ] Do not refresh DuckDB index if project did not change
 ** [ ] Search to support exclude. For example - tests
@@ -28,9 +28,9 @@ hard to generate file summaries with comments as individual nodes and as a comme
 *** [X] Add support for export default `export default function MyApp() { ... }`
 *** [X] Fix commonJs export: `exports.area = (r) => PI * r ** 2` produces `export exports.area = (r) => { ... }`
 *** [X] Fix include_parents for summary generator
-** [ ] JavaScript
+** [X] JavaScript
 ** [ ] Java
 ** [ ] HTML
-** [ ] C
+** [X] C
 * [ ] Storage
 ** [ ] Add query timeouts to DuckDB to detect lockups
