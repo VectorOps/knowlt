@@ -90,27 +90,7 @@ class ProcessFileParams:
 
 
 def _get_parser_map(pm: ProjectManager) -> dict[str, Type[AbstractCodeParser]]:
-    parser_map = {}
-    for parser_cls in CodeParserRegistry.get_parsers():
-        for ext in parser_cls.extensions:
-            parser_map[ext] = parser_cls
-
-        lang_name = parser_cls.language.value
-        if lang_settings := pm.settings.languages.get(lang_name):
-            for ext in lang_settings.extra_extensions:
-                if not ext.startswith("."):
-                    ext = f".{ext}"
-
-                if ext in parser_map and parser_map[ext] != parser_cls:
-                    logger.warning(
-                        "Overriding parser for extension from settings",
-                        extension=ext,
-                        language=lang_name,
-                        original_parser=parser_map[ext].__name__,
-                        new_parser=parser_cls.__name__,
-                    )
-                parser_map[ext] = parser_cls
-    return parser_map
+    return CodeParserRegistry.get_extension_map(pm.settings)
 
 
 def _process_file(

@@ -32,6 +32,7 @@ def _get_parser() -> ts.Parser:
 
 class JavaScriptCodeParser(AbstractCodeParser):
     language = ProgrammingLanguage.JAVASCRIPT
+    parser_key = "javascript"
     extensions = [".js", ".jsx", ".mjs"]
     _RESOLVE_SUFFIXES = (".js", ".jsx", ".mjs")
 

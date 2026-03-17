@@ -45,6 +45,7 @@ class TerraformCodeParser(AbstractCodeParser):
     """
 
     language = ProgrammingLanguage.TERRAFORM
+    parser_key = "terraform"
     extensions = [".tf", ".tfvars"]
 
     def __init__(self, pm: "ProjectManager", repo: Repo, rel_path: str) -> None:

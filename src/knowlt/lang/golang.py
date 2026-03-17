@@ -33,6 +33,7 @@ def _get_parser() -> ts.Parser:
 
 class GolangCodeParser(AbstractCodeParser):
     language = ProgrammingLanguage.GO
+    parser_key = "go"
     extensions = (".go",)
 
     def __init__(self, pm: "ProjectManager", repo: Repo, rel_path: str):

@@ -28,6 +28,7 @@ def _get_parser() -> ts.Parser:
 
 class CppCodeParser(CCodeParser):
     language = ProgrammingLanguage.CPP
+    parser_key = "cpp"
     extensions = (".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx", ".ipp", ".tpp")
 
     def __init__(self, pm: "ProjectManager", repo: Repo, rel_path: str):

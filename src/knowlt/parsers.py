@@ -1,4 +1,5 @@
 import os
+import importlib
 from typing import Optional, List, Dict, Any, Type, Tuple
 from abc import ABC, abstractmethod
 import inspect
@@ -121,6 +122,7 @@ class AbstractCodeParser(ABC):
     """
 
     language: ProgrammingLanguage
+    parser_key: str
     extensions: List[str]
     pm: "ProjectManager"
     repo: Repo
@@ -135,6 +137,10 @@ class AbstractCodeParser(ABC):
         if not inspect.isabstract(cls):
             if not hasattr(cls, "extensions") or not cls.extensions:
                 raise ValueError(f"{cls.__name__} missing `extensions`")
+            if not hasattr(cls, "parser_key") or not cls.parser_key:
+                raise ValueError(f"{cls.__name__} missing `parser_key`")
+            cls.parser_key = cls.parser_key.strip().lower()
+            cls.extensions = [CodeParserRegistry.normalize_extension(ext) for ext in cls.extensions]
             CodeParserRegistry.register_parser(cls)
 
     def __init__(self, pm: "ProjectManager", repo: Repo, rel_path: str) -> None:
@@ -299,7 +305,10 @@ class CodeParserRegistry:
     """
 
     _instance = None
+    _builtins_loaded = False
     _parsers: List[Type[AbstractCodeParser]] = []
+    _parsers_by_key: Dict[str, Type[AbstractCodeParser]] = {}
+    _default_extension_map: Dict[str, Type[AbstractCodeParser]] = {}
     _lang_helpers: Dict[ProgrammingLanguage, AbstractLanguageHelper] = {}
 
     def __new__(cls):
@@ -314,17 +323,105 @@ class CodeParserRegistry:
         cls._lang_helpers[lang] = helper
 
     @classmethod
+    def ensure_builtin_parsers_loaded(cls) -> None:
+        if cls._builtins_loaded:
+            return
+        importlib.import_module("knowlt.lang")
+        cls._builtins_loaded = True
+
+    @classmethod
+    def normalize_extension(cls, extension: str) -> str:
+        ext = extension.strip().lower()
+        if not ext:
+            raise ValueError("Extension cannot be empty")
+        if not ext.startswith("."):
+            ext = f".{ext}"
+        return ext
+
+    @classmethod
     def get_helper(cls, lang: ProgrammingLanguage) -> Optional[AbstractLanguageHelper]:
         return cls._lang_helpers.get(lang)
 
     @classmethod
     def register_parser(cls, parser: Type[AbstractCodeParser]) -> None:
+        existing_parser = cls._parsers_by_key.get(parser.parser_key)
+        if existing_parser is not None and existing_parser is not parser:
+            raise ValueError(f"Duplicate parser key registered: {parser.parser_key}")
+
         if parser not in cls._parsers:
             cls._parsers.append(parser)
+        cls._parsers_by_key[parser.parser_key] = parser
+
+        for ext in parser.extensions:
+            existing_ext_parser = cls._default_extension_map.get(ext)
+            if existing_ext_parser is not None and existing_ext_parser is not parser:
+                logger.warning(
+                    "Overriding default parser for extension",
+                    extension=ext,
+                    original_parser=existing_ext_parser.__name__,
+                    new_parser=parser.__name__,
+                )
+            cls._default_extension_map[ext] = parser
 
     @classmethod
     def get_parsers(cls) -> List[Type[AbstractCodeParser]]:
-        return cls._parsers
+        cls.ensure_builtin_parsers_loaded()
+        return list(cls._parsers)
+
+    @classmethod
+    def get_parser(cls, parser_key: str) -> Optional[Type[AbstractCodeParser]]:
+        cls.ensure_builtin_parsers_loaded()
+        return cls._parsers_by_key.get(parser_key.strip().lower())
+
+    @classmethod
+    def get_default_extension_map(cls) -> Dict[str, Type[AbstractCodeParser]]:
+        cls.ensure_builtin_parsers_loaded()
+        return dict(cls._default_extension_map)
+
+    @classmethod
+    def get_extension_map(cls, settings: Any = None) -> Dict[str, Type[AbstractCodeParser]]:
+        parser_map = cls.get_default_extension_map()
+        if settings is None:
+            return parser_map
+
+        languages = getattr(settings, "languages", {}) or {}
+        for parser_cls in cls.get_parsers():
+            lang_settings = languages.get(parser_cls.language.value)
+            if not lang_settings:
+                continue
+
+            for ext in getattr(lang_settings, "extra_extensions", []) or []:
+                normalized_ext = cls.normalize_extension(ext)
+                existing_parser = parser_map.get(normalized_ext)
+                if existing_parser is not None and existing_parser is not parser_cls:
+                    logger.warning(
+                        "Overriding parser for extension from language settings",
+                        extension=normalized_ext,
+                        language=parser_cls.language.value,
+                        original_parser=existing_parser.__name__,
+                        new_parser=parser_cls.__name__,
+                    )
+                parser_map[normalized_ext] = parser_cls
+
+        for ext, parser_key in (getattr(settings, "parser_extensions", {}) or {}).items():
+            normalized_ext = cls.normalize_extension(ext)
+            parser_cls = cls.get_parser(parser_key)
+            if parser_cls is None:
+                raise ValueError(
+                    f"Unknown parser '{parser_key}' configured for extension '{normalized_ext}'"
+                )
+
+            existing_parser = parser_map.get(normalized_ext)
+            if existing_parser is not None and existing_parser is not parser_cls:
+                logger.warning(
+                    "Overriding parser for extension from parser settings",
+                    extension=normalized_ext,
+                    original_parser=existing_parser.__name__,
+                    new_parser=parser_cls.__name__,
+                )
+            parser_map[normalized_ext] = parser_cls
+
+        return parser_map
 
 
 # Helpers
