@@ -93,6 +93,45 @@ def _get_parser_map(pm: ProjectManager) -> dict[str, Type[AbstractCodeParser]]:
     return CodeParserRegistry.get_extension_map(pm.settings)
 
 
+def _is_utf8_text_file(path: Path) -> bool:
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return False
+
+    if b"\x00" in data:
+        return False
+
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+
+    return True
+
+
+def _resolve_parser_cls(
+    pm: ProjectManager,
+    path: Path,
+    parser_map: dict[str, Type[AbstractCodeParser]],
+) -> Optional[Type[AbstractCodeParser]]:
+    parser_cls = parser_map.get(path.suffix.lower())
+    if parser_cls is not None:
+        return parser_cls
+
+    if not pm.settings.parse_unknown_text_files:
+        return None
+
+    text_parser_cls = CodeParserRegistry.get_parser("text")
+    if text_parser_cls is None:
+        return None
+
+    if not _is_utf8_text_file(path):
+        return None
+
+    return text_parser_cls
+
+
 def _process_file(
     params: ProcessFileParams,
 ) -> ProcessFileResult:
@@ -121,7 +160,7 @@ def _process_file(
             )
 
         # File has changed or is new, needs processing
-        parser_cls = p.parser_map.get(p.path.suffix.lower())
+        parser_cls = _resolve_parser_cls(p.pm, p.path, p.parser_map)
         if parser_cls is None:
             duration = time.perf_counter() - file_proc_start
             return ProcessFileResult(

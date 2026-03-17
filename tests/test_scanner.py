@@ -61,6 +61,21 @@ async def _make_project(root: Path) -> ProjectManager:
     return await ProjectManager.create(settings, data_repo)
 
 
+async def _make_project_with_settings(
+    root: Path, **settings_overrides
+) -> ProjectManager:
+    settings = ProjectSettings(
+        project_name="test",
+        repo_name="test",
+        repo_path=str(root),
+        **settings_overrides,
+    )
+    data_repo = DuckDBDataRepository(settings)
+    if PythonCodeParser is not None:
+        CodeParserRegistry.register_parser(PythonCodeParser)
+    return await ProjectManager.create(settings, data_repo)
+
+
 def _parse(pm: ProjectManager, rel_path: str):
     parser = PythonCodeParser(pm, pm.default_repo, rel_path)
     return parser.parse(ProjectCache())
@@ -271,3 +286,57 @@ async def test_scan_repo_last_scanned_and_skip_unmodified(tmp_path: Path):
     repo_meta3 = (await rs.repo.get_by_ids([repo_id]))[0]
     assert repo_meta3.last_scanned is not None
     assert repo_meta3.last_scanned >= repo_meta2.last_scanned
+
+
+@pytest.mark.asyncio
+async def test_scan_repo_unknown_utf8_text_files_are_bare_by_default(tmp_path: Path):
+    repo_dir = tmp_path / "repo_unknown_text_default"
+    repo_dir.mkdir()
+    file_path = repo_dir / "notes.log"
+    file_path.write_text("hello from a plain text file\n")
+
+    pm = await _make_project(repo_dir)
+    await scan_repo(pm, pm.default_repo)
+
+    rs = pm.data
+    repo_id = pm.default_repo.id
+    files = await rs.file.get_list(FileFilter(repo_ids=[repo_id]))
+    assert len(files) == 1
+    assert files[0].path == "notes.log"
+
+    nodes = await rs.node.get_list(NodeFilter(file_ids=[files[0].id]))
+    assert nodes == []
+
+
+@pytest.mark.asyncio
+async def test_scan_repo_unknown_utf8_text_files_use_text_parser_when_enabled(
+    tmp_path: Path,
+):
+    repo_dir = tmp_path / "repo_unknown_text_enabled"
+    repo_dir.mkdir()
+    text_path = repo_dir / "notes.log"
+    binary_path = repo_dir / "data.bin"
+    text_path.write_text("hello from a plain text file\n")
+    binary_path.write_bytes(b"\x00\xff\x10binary")
+
+    pm = await _make_project_with_settings(
+        repo_dir,
+        parse_unknown_text_files=True,
+    )
+    await scan_repo(pm, pm.default_repo)
+
+    rs = pm.data
+    repo_id = pm.default_repo.id
+    files = await rs.file.get_list(FileFilter(repo_ids=[repo_id]))
+    files_by_path = {f.path: f for f in files}
+    assert set(files_by_path) == {"notes.log", "data.bin"}
+
+    text_nodes = await rs.node.get_list(NodeFilter(file_ids=[files_by_path["notes.log"].id]))
+    assert len(text_nodes) == 1
+    assert text_nodes[0].kind == NodeKind.LITERAL
+    assert text_nodes[0].body == "hello from a plain text file\n"
+
+    binary_nodes = await rs.node.get_list(
+        NodeFilter(file_ids=[files_by_path["data.bin"].id])
+    )
+    assert binary_nodes == []
