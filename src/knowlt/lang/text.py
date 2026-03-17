@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
 class TextParser(AbstractCodeParser):
     language = ProgrammingLanguage.TEXT
+    parser_key = "text"
     extensions = (".txt",)
 
     def __init__(self, pm: "ProjectManager", repo: Repo, rel_path: str):

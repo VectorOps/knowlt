@@ -307,6 +307,14 @@ class ProjectSettings(BaseSettings):
         default_factory=PathsSettings,
         description="Settings for path management.",
     )
+    parser_extensions: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Additional or overriding extension-to-parser mappings. Keys are file "
+            "extensions and values are parser keys. These settings are merged on top "
+            "of the built-in parser defaults."
+        ),
+    )
     languages: dict[str, LanguageSettings] = Field(
         default_factory=_get_default_languages,
         description="A dictionary of language-specific settings, keyed by language name.",

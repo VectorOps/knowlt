@@ -32,6 +32,7 @@ def _get_parser() -> ts.Parser:
 
 class PythonCodeParser(AbstractCodeParser):
     language = ProgrammingLanguage.PYTHON
+    parser_key = "python"
     extensions = [".py"]
     settings: PythonSettings
 

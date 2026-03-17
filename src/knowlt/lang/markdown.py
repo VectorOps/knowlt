@@ -34,6 +34,7 @@ def _get_parser():
 
 class MarkdownCodeParser(AbstractCodeParser):
     language = ProgrammingLanguage.MARKDOWN
+    parser_key = "markdown"
     extensions = (".md", ".markdown")
 
     def __init__(self, pm: "ProjectManager", repo: Repo, rel_path: str):

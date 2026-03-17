@@ -33,6 +33,7 @@ def _get_parser() -> ts.Parser:
 
 class CCodeParser(AbstractCodeParser):
     language = ProgrammingLanguage.C
+    parser_key = "c"
     extensions = (".c", ".h")
 
     def __init__(self, pm: "ProjectManager", repo: Repo, rel_path: str):
