@@ -43,6 +43,9 @@ async def test_schema_has_name_and_pattern_string():
     assert schema["parameters"]["type"] == "object"
     assert "pattern" in schema["parameters"]["properties"]
     assert schema["parameters"]["properties"]["pattern"]["type"] == "string"
+    assert "Python glob-style pattern" in schema["parameters"]["properties"]["pattern"]["description"]
+    assert "'**/AGENTS.md' do not match a root-level 'AGENTS.md'" in schema["parameters"]["properties"]["pattern"]["description"]
+    assert "Python glob semantics apply" in schema["description"]
     assert "limit" not in schema["parameters"]["properties"]
     assert "required" in schema["parameters"]
     assert schema["parameters"]["required"] == ["pattern"]

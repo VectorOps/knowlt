@@ -15,7 +15,11 @@ class ListFilesReq(BaseModel):
     """Request model for listing files."""
 
     pattern: str = Field(
-        description="An fnmatch-style glob pattern to match against file paths."
+        description=(
+            "A Python glob-style pattern to match against file paths. "
+            "Note: patterns like '**/AGENTS.md' do not match a root-level "
+            "'AGENTS.md'; use 'AGENTS.md' separately for that case."
+        )
     )
 
 
@@ -106,7 +110,8 @@ class ListFilesTool(BaseTool):
         return {
             "name": self.tool_name,
             "description": (
-                "Return a list of project files whose path matches the supplied glob pattern. "
+                "Return a list of project files whose path matches the supplied Python glob-style pattern. "
+                "Python glob semantics apply: patterns like '**/AGENTS.md' do not match a root-level 'AGENTS.md'. "
                 f"This tool will return up to {limit} files. "
                 f"File paths for repos other than the default repo will be prefixed with '{VIRTUAL_PATH_PREFIX}/<repo_name>'."
             ),
@@ -116,7 +121,8 @@ class ListFilesTool(BaseTool):
                     "pattern": {
                         "type": "string",
                         "description": (
-                            "An fnmatch-style glob pattern (e.g. '**/*.py'). "
+                            "A Python glob-style pattern (e.g. '**/*.py'). "
+                            "Note: patterns like '**/AGENTS.md' do not match a root-level 'AGENTS.md'. "
                             "You may optionally prefix the pattern with a virtual-path "
                             f"('{VIRTUAL_PATH_PREFIX}/<repo_name>/...') or project-path "
                             "('<repo_name>/...') repo name to limit the search to that repo."
