@@ -249,7 +249,6 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pypika" },
-    { name = "sentence-transformers" },
     { name = "structlog" },
     { name = "tree-sitter" },
     { name = "tree-sitter-c" },
@@ -261,6 +260,11 @@ dependencies = [
     { name = "tree-sitter-markdown" },
     { name = "tree-sitter-python" },
     { name = "tree-sitter-typescript" },
+]
+
+[package.optional-dependencies]
+embeddings = [
+    { name = "sentence-transformers" },
 ]
 
 [package.dev-dependencies]
@@ -280,7 +284,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.11.7" },
     { name = "pydantic-settings", specifier = ">=2.10.1" },
     { name = "pypika", git = "https://github.com/VectorOps/pypika.git?rev=v0.49.4-dev" },
-    { name = "sentence-transformers", specifier = ">=5.1.2" },
+    { name = "sentence-transformers", marker = "extra == 'embeddings'", specifier = ">=5.1.2" },
     { name = "structlog", specifier = ">=25.4.0" },
     { name = "tree-sitter", specifier = ">=0.24.0" },
     { name = "tree-sitter-c", specifier = ">=0.24.1" },
@@ -293,6 +297,7 @@ requires-dist = [
     { name = "tree-sitter-python", specifier = ">=0.23.6" },
     { name = "tree-sitter-typescript", specifier = ">=0.23.2" },
 ]
+provides-extras = ["embeddings"]
 
 [package.metadata.requires-dev]
 dev = [

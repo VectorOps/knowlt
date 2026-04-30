@@ -1,8 +1,10 @@
 import os
 import os.path as op
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
+
+from knowlt.init import init_project
 
 from knowlt.data import AbstractDataRepository
 from knowlt.models import Project, Repo
@@ -197,3 +199,24 @@ class TestProjectPaths:
         )
         bad_path = op.join(VIRTUAL_PATH_PREFIX, "non_existent_repo", "file.py")
         assert pm_disabled.deconstruct_virtual_path(bad_path) is None
+
+
+@pytest.mark.asyncio
+async def test_init_project_disables_embeddings_when_optional_dependencies_missing(
+    tmp_path,
+):
+    settings = ProjectSettings(
+        project_name="test-project",
+        repo_name="test-repo",
+        repo_path=str(tmp_path),
+        embedding={"enabled": True},
+    )
+
+    with patch("knowlt.init.is_sentence_transformers_available", return_value=False):
+        pm = await init_project(settings, refresh=False)
+
+    try:
+        assert pm.embeddings is None
+        assert await pm.compute_embedding("test query") is None
+    finally:
+        await pm.destroy()

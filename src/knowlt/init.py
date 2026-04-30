@@ -2,8 +2,13 @@ from knowlt.stores.duckdb import DuckDBDataRepository
 from knowlt.settings import ProjectSettings
 from knowlt.project import ProjectManager
 from knowlt.embeddings import EmbeddingWorker
+from knowlt.embeddings.sentence import (
+    EMBEDDINGS_EXTRA_INSTALL_HINT,
+    is_sentence_transformers_available,
+)
 from knowlt.data import AbstractDataRepository
 from knowlt import scanner
+from knowlt.logger import logger
 
 
 async def init_project(
@@ -25,14 +30,20 @@ async def init_project(
 
     embeddings: EmbeddingWorker | None = None
     if settings.embedding and settings.embedding.enabled:
-        embeddings = EmbeddingWorker(
-            settings.embedding.calculator_type,
-            cache_backend=settings.embedding.cache_backend,
-            cache_path=settings.embedding.cache_path,
-            model_name=settings.embedding.model_name,
-            device=settings.embedding.device,
-            batch_size=settings.embedding.batch_size,
-        )
+        if is_sentence_transformers_available():
+            embeddings = EmbeddingWorker(
+                settings.embedding.calculator_type,
+                cache_backend=settings.embedding.cache_backend,
+                cache_path=settings.embedding.cache_path,
+                model_name=settings.embedding.model_name,
+                device=settings.embedding.device,
+                batch_size=settings.embedding.batch_size,
+            )
+        else:
+            logger.warning(
+                "Embeddings are enabled but optional dependencies are not installed; disabling embeddings.",
+                install_hint=EMBEDDINGS_EXTRA_INSTALL_HINT,
+            )
 
     pm = await ProjectManager.create(
         settings,

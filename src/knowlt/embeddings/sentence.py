@@ -1,23 +1,38 @@
 import logging
 import time
 import os
+import importlib.util
 
 from typing import List, Optional, Any
 import hashlib
+from typing import TYPE_CHECKING
 
-try:
-    from sentence_transformers import SentenceTransformer  # third-party
-except ImportError as exc:  # pragma: no cover
-    raise ImportError(
-        "The 'sentence_transformers' and 'numpy' packages are required for "
-        "SentenceTransformersEmbeddingsCalculator.\n"
-        "Install it with:  pip install sentence-transformers numpy"
-    ) from exc
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 from knowlt.embeddings.cache import EmbeddingCacheBackend
 from knowlt.embeddings.interface import EmbeddingCalculator, EMBEDDING_DIM
 from knowlt.models import Vector
 from knowlt.logger import logger
+
+
+EMBEDDINGS_EXTRA_INSTALL_HINT = "Install it with: pip install knowlt[embeddings]"
+
+
+def is_sentence_transformers_available() -> bool:
+    return importlib.util.find_spec("sentence_transformers") is not None
+
+
+def require_sentence_transformers() -> type["SentenceTransformer"]:
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as exc:  # pragma: no cover
+        raise ImportError(
+            "Embedding dependencies are not installed. "
+            f"{EMBEDDINGS_EXTRA_INSTALL_HINT}"
+        ) from exc
+
+    return SentenceTransformer
 
 
 class LocalEmbeddingCalculator(EmbeddingCalculator):
@@ -56,20 +71,21 @@ class LocalEmbeddingCalculator(EmbeddingCalculator):
         self._device = device
         self._batch_size = batch_size
         self._model_kwargs = model_kwargs
-        self._model: Optional[SentenceTransformer] = None  # lazy loaded
+        self._model: Optional["SentenceTransformer"] = None  # lazy loaded
         self._last_encode_time: Optional[float] = None
 
         self._cache: EmbeddingCacheBackend | None = cache
 
     # Internal helpers
-    def _get_model(self) -> SentenceTransformer:
+    def _get_model(self) -> "SentenceTransformer":
         if self._model is None:
+            sentence_transformer_cls = require_sentence_transformers()
             logger.debug(
                 "embeddings_model_initializing",
                 model_name=self._model_name,
                 device=self._device,
             )
-            self._model = SentenceTransformer(
+            self._model = sentence_transformer_cls(
                 self._model_name,
                 device=self._device,
                 truncate_dim=EMBEDDING_DIM,
