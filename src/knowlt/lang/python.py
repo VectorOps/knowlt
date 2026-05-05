@@ -42,6 +42,7 @@ class PythonCodeParser(AbstractCodeParser):
         # Cache frequently re-used values per instance
         self._project_root: Path = Path(self.repo.root_path).resolve()
         self._module_path_cache: Dict[str, Optional[Path]] = {}
+        self._node_text_cache: Dict[tuple[int, int], str] = {}
         lang_settings = self.pm.settings.languages.get(
             self.language.value, PythonSettings()
         )
@@ -97,10 +98,21 @@ class PythonCodeParser(AbstractCodeParser):
         self._debug_unknown_node(node)
         return [self._literal_node(node)]
 
+    def _node_text(self, node: Optional[ts.Node]) -> str:
+        if node is None:
+            return ""
+        key = (node.start_byte, node.end_byte)
+        cached = self._node_text_cache.get(key)
+        if cached is not None:
+            return cached
+        text = get_node_text(node) or ""
+        self._node_text_cache[key] = text
+        return text
+
     # Small helpers to reduce duplication
     def _gather_decorators(self, wrapper: ts.Node) -> List[str]:
         return [
-            (get_node_text(c) or "").strip()
+            self._node_text(c).strip()
             for c in wrapper.children
             if c.type == "decorator"
         ]
@@ -156,10 +168,10 @@ class PythonCodeParser(AbstractCodeParser):
             if aliased is not None:
                 name_node = aliased.child_by_field_name("name")
                 alias_node = aliased.child_by_field_name("alias")
-                import_path = get_node_text(name_node) or None
-                alias = get_node_text(alias_node) or None
+                import_path = self._node_text(name_node) or None
+                alias = self._node_text(alias_node) or None
             elif dotted is not None:
-                import_path = get_node_text(dotted) or None
+                import_path = self._node_text(dotted) or None
             allowed = {
                 "dotted_name",
                 "aliased_import",
@@ -180,8 +192,8 @@ class PythonCodeParser(AbstractCodeParser):
                 (c for c in node.children if c.type == "relative_import"), None
             )
             mod_node = next((c for c in node.children if c.type == "dotted_name"), None)
-            rel_txt = get_node_text(rel_node) or ""
-            mod_txt = get_node_text(mod_node) or ""
+            rel_txt = self._node_text(rel_node)
+            mod_txt = self._node_text(mod_node)
             import_path = f"{rel_txt}{mod_txt}" if (rel_txt or mod_txt) else None
             dot = bool(rel_node)
             aliased = next(
@@ -189,7 +201,7 @@ class PythonCodeParser(AbstractCodeParser):
             )
             if aliased is not None:
                 alias_node = aliased.child_by_field_name("alias")
-                alias = get_node_text(alias_node) or None
+                alias = self._node_text(alias_node) or None
             allowed = {
                 "relative_import",
                 "dotted_name",
@@ -246,7 +258,7 @@ class PythonCodeParser(AbstractCodeParser):
         name_node = node.child_by_field_name("name")
         if name_node is None:
             return []
-        fn_name = get_node_text(name_node)
+        fn_name = self._node_text(name_node)
         base_header = self._build_function_header(node)
         header, comment, doc = self._collect_def_metadata(node, base_header)
         kind = (
@@ -265,7 +277,7 @@ class PythonCodeParser(AbstractCodeParser):
         name_node = node.child_by_field_name("name")
         if name_node is None:
             return []
-        cls_name = get_node_text(name_node)
+        cls_name = self._node_text(name_node)
         base_header = self._build_class_header(node)
         header, comment, doc = self._collect_def_metadata(node, base_header)
         cls = self._make_node(
@@ -412,7 +424,7 @@ class PythonCodeParser(AbstractCodeParser):
             return True
 
         # bug-work-around: async method wrongly tagged as function_definition
-        if node.type == "function_definition" and get_node_text(node).startswith("async "):
+        if node.type == "function_definition" and self._node_text(node).startswith("async "):
             return True
 
         if node.type == "decorated_definition":
@@ -426,14 +438,14 @@ class PythonCodeParser(AbstractCodeParser):
         name_node = node.child_by_field_name("name")
         params_node = node.child_by_field_name("parameters")
         ret_node = node.child_by_field_name("return_type")
-        name = get_node_text(name_node) or "<anonymous>"
-        params = get_node_text(params_node) or "()"
-        ret = (get_node_text(ret_node) or "").strip()
+        name = self._node_text(name_node) or "<anonymous>"
+        params = self._node_text(params_node) or "()"
+        ret = self._node_text(ret_node).strip()
         prefix = "async def" if is_async else "def"
         return f"{prefix} {name}{params}{(' -> ' + ret) if ret else ''}:"
 
     def _build_class_header(self, node: ts.Node) -> str:
-        code = get_node_text(node) or ""
+        code = self._node_text(node)
         idx = code.find("class ")
         if idx == -1:
             return "class:"
@@ -465,9 +477,9 @@ class PythonCodeParser(AbstractCodeParser):
                 and ch.children
                 and ch.children[0].type == "string"
             ):
-                return (get_node_text(ch.children[0]) or "").strip()
+                return self._node_text(ch.children[0]).strip()
             if ch.type == "string":
-                return (get_node_text(ch) or "").strip()
+                return self._node_text(ch).strip()
             if ch.type not in ("comment",):
                 break
         return None
@@ -479,7 +491,7 @@ class PythonCodeParser(AbstractCodeParser):
             if node.start_point[0] - sib.end_point[0] > 2:
                 break
             if sib.type == "comment":
-                raw = get_node_text(sib) or ""
+                raw = self._node_text(sib)
                 comments.append(raw.strip())
                 sib = sib.prev_sibling
                 continue
@@ -539,7 +551,7 @@ class PythonCodeParser(AbstractCodeParser):
             path=path,
             node_type=node.type,
             line=node.start_point[0] + 1,
-            raw=(get_node_text(node) or "")[:200],
+            raw=self._node_text(node)[:200],
         )
         if context is not None:
             fields["context"] = context

@@ -4,8 +4,8 @@ from typing import Optional, List, Dict, Any, Type, Tuple
 from abc import ABC, abstractmethod
 import inspect
 import textwrap
+from dataclasses import dataclass, field
 import tree_sitter as ts
-from pydantic import BaseModel, Field
 from knowlt.models import (
     ProgrammingLanguage,
     NodeKind,
@@ -25,15 +25,22 @@ from knowlt.logger import logger
 
 
 # Parser-specific data structures
-class ParsedImportEdge(BaseModel):
+@dataclass(slots=True)
+class ParsedImportEdge:
+    virtual_path: str  # syntax specific virtual path to package
+    external: bool
+    raw: str
+    alias: Optional[str] = None  # import alias if any
+    dot: bool = False  # true for dot-imports (import . "pkg")
     physical_path: Optional[str] = (
         None  # relative physical path to package from project root.
     )
-    virtual_path: str  # syntax specific virtual path to package
-    alias: Optional[str] = None  # import alias if any
-    dot: bool = False  # true for dot-imports (import . "pkg")
-    external: bool
-    raw: str
+
+    def __post_init__(self) -> None:
+        if not self.virtual_path:
+            raise ValueError("ParsedImportEdge.virtual_path must be non-empty")
+        if not self.raw:
+            raise ValueError("ParsedImportEdge.raw must be non-empty")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -46,11 +53,18 @@ class ParsedImportEdge(BaseModel):
         }
 
 
-class ParsedPackage(BaseModel):
+@dataclass(slots=True)
+class ParsedPackage:
     language: ProgrammingLanguage
     physical_path: str  # relative path to package
     virtual_path: str  # syntax specific virtual path to package
-    imports: List[ParsedImportEdge] = Field(default_factory=list)
+    imports: List[ParsedImportEdge] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.physical_path:
+            raise ValueError("ParsedPackage.physical_path must be non-empty")
+        if not self.virtual_path:
+            raise ValueError("ParsedPackage.virtual_path must be non-empty")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -61,23 +75,34 @@ class ParsedPackage(BaseModel):
         }
 
 
-class ParsedNode(BaseModel):
+@dataclass(slots=True)
+class ParsedNode:
     name: Optional[str] = None
-    body: str
-    kind: NodeKind
+    body: str = ""
+    kind: NodeKind = NodeKind.CUSTOM
     subtype: Optional[str] = None
 
-    start_line: int
-    end_line: int
-    start_byte: int
-    end_byte: int
+    start_line: int = 0
+    end_line: int = 0
+    start_byte: int = 0
+    end_byte: int = 0
 
     header: Optional[str] = None
     visibility: Optional[Visibility] = None
     docstring: Optional[str] = None
     comment: Optional[str] = None
 
-    children: List["ParsedNode"] = Field(default_factory=list)
+    children: List["ParsedNode"] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.start_line < 0 or self.end_line < 0:
+            raise ValueError("ParsedNode line numbers must be non-negative")
+        if self.start_line > self.end_line:
+            raise ValueError("ParsedNode.start_line cannot exceed end_line")
+        if self.start_byte < 0 or self.end_byte < 0:
+            raise ValueError("ParsedNode byte offsets must be non-negative")
+        if self.start_byte > self.end_byte:
+            raise ValueError("ParsedNode.start_byte cannot exceed end_byte")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -96,16 +121,21 @@ class ParsedNode(BaseModel):
         }
 
 
-class ParsedFile(BaseModel):
+@dataclass(slots=True)
+class ParsedFile:
     package: Optional[ParsedPackage] = None
-    path: str  # relative path
+    path: str = ""  # relative path
     docstring: Optional[str] = None
 
     file_hash: Optional[str] = None
     last_updated: Optional[int] = None
 
-    nodes: List[ParsedNode] = Field(default_factory=list)
-    imports: List[ParsedImportEdge] = Field(default_factory=list)
+    nodes: List[ParsedNode] = field(default_factory=list)
+    imports: List[ParsedImportEdge] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.path:
+            raise ValueError("ParsedFile.path must be non-empty")
 
     def to_dict(self) -> dict[str, Any]:
         return {

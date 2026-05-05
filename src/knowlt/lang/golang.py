@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Optional, List, Callable
+from typing import Optional, List, Callable, Dict
 
 import tree_sitter as ts
 import tree_sitter_go as tsgo
@@ -42,6 +42,7 @@ class GolangCodeParser(AbstractCodeParser):
         self.source_bytes: bytes = b""
         self.module_path: Optional[str] = None
         self.module_root_abs_path: Optional[str] = None
+        self._node_text_cache: Dict[tuple[int, int], str] = {}
         # Node-type -> handler mapping
         self._handlers: dict[
             str, Callable[[ts.Node, Optional[ParsedNode]], List[ParsedNode]]
@@ -167,6 +168,17 @@ class GolangCodeParser(AbstractCodeParser):
         self.module_root_abs_path = module_root_abs_path
         return None
 
+    def _node_text(self, node: Optional[ts.Node]) -> str:
+        if node is None:
+            return ""
+        key = (node.start_byte, node.end_byte)
+        cached = self._node_text_cache.get(key)
+        if cached is not None:
+            return cached
+        text = get_node_text(node) or ""
+        self._node_text_cache[key] = text
+        return text
+
     def _extract_package_name(self, root_node: ts.Node) -> Optional[str]:
         for node in root_node.children:
             if node.type == "package_clause":
@@ -179,7 +191,7 @@ class GolangCodeParser(AbstractCodeParser):
                     None,
                 )
                 if ident is not None:
-                    return get_node_text(ident)
+                    return self._node_text(ident)
         return None
 
     def _build_virtual_package_path(self, root_node: ts.Node) -> str:
@@ -226,7 +238,7 @@ class GolangCodeParser(AbstractCodeParser):
         comment_nodes.reverse()
         parts: list[str] = []
         for c in comment_nodes:
-            raw = get_node_text(c).strip()
+            raw = self._node_text(c).strip()
             parts.append(raw)
         return "\n".join(parts).strip() or None
 
@@ -260,19 +272,19 @@ class GolangCodeParser(AbstractCodeParser):
 
     def _process_import_spec(self, spec_node: ts.Node) -> None:
         assert self.parsed_file is not None
-        raw_str: str = get_node_text(spec_node).strip()
+        raw_str: str = self._node_text(spec_node).strip()
         alias: Optional[str] = None
         dot = False
         import_path: Optional[str] = None
         for ch in spec_node.children:
             if ch.type in ("package_identifier", "identifier"):
-                alias = get_node_text(ch)
+                alias = self._node_text(ch)
             elif ch.type == "dot":
                 dot = True
             elif ch.type == "blank_identifier":
                 alias = "_"
             elif ch.type == "interpreted_string_literal":
-                import_path = get_node_text(ch).strip()
+                import_path = self._node_text(ch).strip()
             else:
                 self._debug_unknown_node(
                     ch, context="import.spec", parent_type=spec_node.type
@@ -333,11 +345,11 @@ class GolangCodeParser(AbstractCodeParser):
         )
 
     def _build_header(self, node: ts.Node, keyword: str) -> str:
-        code = get_node_text(node) or ""
+        code = self._node_text(node)
         idx = code.find(f"{keyword} ")
         # For type specs, the "type" keyword may live in the parent; synthesize it
         if idx == -1 and keyword == "type":
-            payload = (get_node_text(node) or "").lstrip()
+            payload = self._node_text(node).lstrip()
             code = f"{keyword} {payload}"
             idx = 0
         if idx == -1:
@@ -361,7 +373,7 @@ class GolangCodeParser(AbstractCodeParser):
         ident_node = next((c for c in node.children if c.type == "identifier"), None)
         if ident_node is None:
             return [self._literal_node(node)]
-        name = get_node_text(ident_node)
+        name = self._node_text(ident_node)
         header = self._build_header(node, "func")
         comment = self._get_preceding_comment(node)
         sym = self._make_node(
@@ -378,7 +390,7 @@ class GolangCodeParser(AbstractCodeParser):
         )
         if ident_node is None:
             return [self._literal_node(node)]
-        name = get_node_text(ident_node)
+        name = self._node_text(ident_node)
         header = self._build_header(node, "func")
         comment = self._get_preceding_comment(node)
         sym = self._make_node(
@@ -419,7 +431,7 @@ class GolangCodeParser(AbstractCodeParser):
             if ident is None:
                 continue
 
-            name = get_node_text(ident)
+            name = self._node_text(ident)
             header = self._build_header(spec, "type")
             comment = self._get_preceding_comment(spec) or self._get_preceding_comment(
                 node
@@ -454,7 +466,7 @@ class GolangCodeParser(AbstractCodeParser):
 
             # Ensure the body includes the full type declaration text.
             # type_spec nodes don't include the 'type' keyword; synthesize it.
-            spec_text = (get_node_text(spec) or "").lstrip()
+            spec_text = self._node_text(spec).lstrip()
             if spec_text.startswith("type "):
                 full_body = spec_text
             else:
@@ -526,7 +538,7 @@ class GolangCodeParser(AbstractCodeParser):
             path=path,
             node_type=node.type,
             line=node.start_point[0] + 1,
-            raw=(get_node_text(node) or "")[:200],
+            raw=self._node_text(node)[:200],
         )
         if context is not None:
             fields["context"] = context
@@ -552,7 +564,7 @@ class GolangCodeParser(AbstractCodeParser):
             ),
             None,
         )
-        name = get_node_text(name_node) if name_node is not None else None
+        name = self._node_text(name_node) if name_node is not None else None
         return [
             self._make_node(
                 node,
@@ -574,7 +586,7 @@ class GolangCodeParser(AbstractCodeParser):
             (c for c in node.children if c.type in ("field_identifier", "identifier")),
             None,
         )
-        name = get_node_text(ident) if ident is not None else None
+        name = self._node_text(ident) if ident is not None else None
         return [
             self._make_node(
                 node,

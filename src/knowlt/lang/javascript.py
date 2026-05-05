@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Optional, List, Callable
+from typing import Optional, List, Callable, Dict
 
 import tree_sitter as ts
 import tree_sitter_javascript as tsjs
@@ -39,6 +39,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
     def __init__(self, pm: "ProjectManager", repo: Repo, rel_path: str) -> None:
         super().__init__(pm, repo, rel_path)
         self.parser = _get_parser()
+        self._node_text_cache: Dict[tuple[int, int], str] = {}
         self._handlers: dict[
             str, Callable[[ts.Node, Optional[ParsedNode]], List[ParsedNode]]
         ] = {
@@ -131,6 +132,17 @@ class JavaScriptCodeParser(AbstractCodeParser):
         self._debug_unknown_node(node)
         return [self._literal_node(node)]
 
+    def _node_text(self, node: Optional[ts.Node]) -> str:
+        if node is None:
+            return ""
+        key = (node.start_byte, node.end_byte)
+        cached = self._node_text_cache.get(key)
+        if cached is not None:
+            return cached
+        text = get_node_text(node) or ""
+        self._node_text_cache[key] = text
+        return text
+
     # --- helpers ----------------------------------------------------
     def _literal_node(self, node: ts.Node) -> ParsedNode:
         return self._make_node(node, kind=NodeKind.LITERAL, name=None, header=None)
@@ -153,7 +165,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
             path=path,
             node_type=node.type,
             line=node.start_point[0] + 1,
-            raw=(get_node_text(node) or "")[:200],
+            raw=self._node_text(node)[:200],
         )
         if context is not None:
             fields["context"] = context
@@ -168,7 +180,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
             if node.start_point[0] - sib.end_point[0] > 2:
                 break
             if sib.type == "comment":
-                raw = get_node_text(sib) or ""
+                raw = self._node_text(sib)
                 comments.append(raw.strip())
                 sib = sib.prev_sibling
                 continue
@@ -185,9 +197,9 @@ class JavaScriptCodeParser(AbstractCodeParser):
     def _build_fn_like_header(
         self, node: ts.Node, *, prefix: str, name: Optional[str]
     ) -> str:
-        params = get_node_text(node.child_by_field_name("parameters")) or "()"
+        params = self._node_text(node.child_by_field_name("parameters")) or "()"
         async_prefix = ""
-        raw = (get_node_text(node) or "").lstrip()
+        raw = self._node_text(node).lstrip()
         if raw.startswith("async"):
             async_prefix = "async "
         nm = name or ""
@@ -195,7 +207,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
         return f"{async_prefix}{prefix}{' ' if prefix else ''}{nm}{params}"
 
     def _build_class_like_header(self, node: ts.Node, *, keyword: str) -> str:
-        code = get_node_text(node) or ""
+        code = self._node_text(node)
         head = code.split("{", 1)[0].strip().rstrip(";")
         return head or keyword
 
@@ -207,7 +219,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
                 .decode("utf8")
                 .strip()
             )
-        return (get_node_text(arrow_node) or "").split("{", 1)[0].strip()
+        return self._node_text(arrow_node).split("{", 1)[0].strip()
 
     def _build_function_expression_header_only(self, fn_node: ts.Node) -> str:
         body_node = fn_node.child_by_field_name("body") or fn_node.child_by_field_name(
@@ -219,7 +231,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
                 .decode("utf8")
                 .strip()
             )
-        return (get_node_text(fn_node) or "").split("{", 1)[0].strip()
+        return self._node_text(fn_node).split("{", 1)[0].strip()
 
     def _resolve_module(self, module: str) -> tuple[Optional[str], str, bool]:
         if module.startswith("."):
@@ -239,21 +251,21 @@ class JavaScriptCodeParser(AbstractCodeParser):
     def _resolve_arrow_function_name(self, holder_node: ts.Node) -> Optional[str]:
         name_node = holder_node.child_by_field_name("name")
         if name_node:
-            name = get_node_text(name_node) or ""
+            name = self._node_text(name_node)
             if name:
                 return name.split(".")[-1]
         lhs_node = holder_node.child_by_field_name(
             "left"
         ) or holder_node.child_by_field_name("name")
         if lhs_node:
-            lhs = get_node_text(lhs_node) or ""
+            lhs = self._node_text(lhs_node)
             if lhs:
                 return lhs.split(".")[-1]
         stack = [holder_node]
         while stack:
             cur = stack.pop()
             if cur.type in ("identifier", "property_identifier"):
-                val = get_node_text(cur) or ""
+                val = self._node_text(cur)
                 if val:
                     return val.split(".")[-1]
             stack.extend(list(cur.children))
@@ -262,21 +274,21 @@ class JavaScriptCodeParser(AbstractCodeParser):
     def _resolve_class_expression_name(self, holder_node: ts.Node) -> Optional[str]:
         name_node = holder_node.child_by_field_name("name")
         if name_node:
-            name = get_node_text(name_node) or ""
+            name = self._node_text(name_node)
             if name:
                 return name.split(".")[-1]
         lhs_node = holder_node.child_by_field_name(
             "left"
         ) or holder_node.child_by_field_name("name")
         if lhs_node:
-            lhs = get_node_text(lhs_node) or ""
+            lhs = self._node_text(lhs_node)
             if lhs:
                 return lhs.split(".")[-1]
         stack = [holder_node]
         while stack:
             cur = stack.pop()
             if cur.type in ("identifier", "property_identifier"):
-                val = get_node_text(cur) or ""
+                val = self._node_text(cur)
                 if val:
                     return val.split(".")[-1]
             stack.extend(list(cur.children))
@@ -286,11 +298,11 @@ class JavaScriptCodeParser(AbstractCodeParser):
     def _handle_import(
         self, node: ts.Node, parent: Optional[ParsedNode]
     ) -> List[ParsedNode]:
-        raw_stmt = get_node_text(node) or ""
+        raw_stmt = self._node_text(node)
         src = node.child_by_field_name("source") or next(
             (c for c in node.children if c.type == "string"), None
         )
-        module = (get_node_text(src) or "").strip("\"'")
+        module = self._node_text(src).strip("\"'")
         if not module:
             self._debug_unknown_node(node, context="import.missing_source")
             return [self._literal_node(node)]
@@ -298,12 +310,12 @@ class JavaScriptCodeParser(AbstractCodeParser):
         alias = None
         name_node = node.child_by_field_name("name")
         if name_node is not None:
-            alias = get_node_text(name_node) or None
+            alias = self._node_text(name_node) or None
         else:
             ns = next((c for c in node.children if c.type == "namespace_import"), None)
             if ns is not None:
                 alias_node = ns.child_by_field_name("name")
-                alias = get_node_text(alias_node) or None
+                alias = self._node_text(alias_node) or None
         assert self.parsed_file is not None
         self.parsed_file.imports.append(
             ParsedImportEdge(
@@ -324,7 +336,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
     def _handle_export(
         self, node: ts.Node, parent: Optional[ParsedNode]
     ) -> List[ParsedNode]:
-        raw_stmt = get_node_text(node) or ""
+        raw_stmt = self._node_text(node)
         # Re-export: export ... from "module"
         source_node = node.child_by_field_name("source") or next(
             (c for c in node.children if c.type in ("from_clause", "string")), None
@@ -333,7 +345,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
             source_node = source_node.child_by_field_name("source")
         # Case 1: re-export (export ... from "module")
         if source_node and source_node.type == "string":
-            module = (get_node_text(source_node) or "").strip("\"'")
+            module = self._node_text(source_node).strip("\"'")
             physical, virtual, external = self._resolve_module(module)
             assert self.parsed_file is not None
             self.parsed_file.imports.append(
@@ -377,7 +389,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
             if ch.type in ("export_clause", "from_clause", "string"):
                 continue
             if ch.type in ("identifier", "property_identifier"):
-                txt = (get_node_text(ch) or "").strip() or None
+                txt = self._node_text(ch).strip() or None
                 exp.children.append(
                     self._make_node(ch, kind=NodeKind.LITERAL, name=txt, header=txt)
                 )
@@ -391,7 +403,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
         name_node = node.child_by_field_name("name")
         if name_node is None:
             return []
-        fn_name = get_node_text(name_node) or None
+        fn_name = self._node_text(name_node) or None
         header = self._build_fn_like_header(node, prefix="function", name=fn_name)
         kind = (
             NodeKind.METHOD
@@ -405,7 +417,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
         self, node: ts.Node, parent: Optional[ParsedNode]
     ) -> List[ParsedNode]:
         name_node = node.child_by_field_name("name")
-        name = get_node_text(name_node) or None
+        name = self._node_text(name_node) or None
         header = self._build_fn_like_header(node, prefix="function", name=name)
         kind = (
             NodeKind.METHOD
@@ -465,7 +477,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
             )
         else:
             header = (
-                (get_node_text(holder_node) or "").split("{", 1)[0].strip().rstrip(";")
+                self._node_text(holder_node).split("{", 1)[0].strip().rstrip(";")
             )
         kind = (
             NodeKind.METHOD
@@ -494,7 +506,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
         name_node = node.child_by_field_name("name")
         if name_node is None:
             return []
-        cls_name = get_node_text(name_node) or None
+        cls_name = self._node_text(name_node) or None
         header = self._build_class_like_header(node, keyword="class")
         cls = self._make_node(node, kind=NodeKind.CLASS, name=cls_name, header=header)
         body = next((c for c in node.children if c.type == "class_body"), None)
@@ -507,7 +519,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
         self, node: ts.Node, parent: Optional[ParsedNode]
     ) -> List[ParsedNode]:
         name_node = node.child_by_field_name("name")
-        name = get_node_text(name_node) or None
+        name = self._node_text(name_node) or None
         body_node = node.child_by_field_name("body") or node.child_by_field_name(
             "statement"
         )
@@ -550,7 +562,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
                 None,
             )
         )
-        pname = get_node_text(name_node) or None
+        pname = self._node_text(name_node) or None
         value_node = node.child_by_field_name("value")
         out: List[ParsedNode] = []
         if value_node is not None:
@@ -617,7 +629,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
                 # require() aliasing
                 if rhs and rhs.type == "call_expression":
                     self._collect_require_calls(
-                        rhs, alias=(get_node_text(lhs) or "").split(".")[-1] or None
+                        rhs, alias=self._node_text(lhs).split(".")[-1] or None
                     )
                 # Holder-aware assignment handling outside export
                 if rhs and rhs.type == "arrow_function":
@@ -643,7 +655,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
         self, node: ts.Node, parent: Optional[ParsedNode]
     ) -> List[ParsedNode]:
         # Group multi-declarator statements under a single lexical node with the keyword header.
-        raw = (get_node_text(node) or "").lstrip()
+        raw = self._node_text(node).lstrip()
         if raw.startswith("const"):
             keyword = "const"
         elif raw.startswith("let"):
@@ -667,16 +679,16 @@ class JavaScriptCodeParser(AbstractCodeParser):
                 ),
                 None,
             )
-            vname = get_node_text(name_node) or None
+            vname = self._node_text(name_node) or None
             value_node = ch.child_by_field_name("value")
-            lhs_header = (get_node_text(name_node) or "").strip()
+            lhs_header = self._node_text(name_node).strip()
             # JS: no type annotation nodes; still check for presence
             type_node = ch.child_by_field_name("type") or next(
                 (c for c in ch.named_children if c.type == "type_annotation"),
                 None,
             )
             if type_node is not None:
-                type_txt = (get_node_text(type_node) or "").strip()
+                type_txt = self._node_text(type_node).strip()
                 if type_txt:
                     lhs_header = (
                         f"{lhs_header}{type_txt}"
@@ -708,10 +720,10 @@ class JavaScriptCodeParser(AbstractCodeParser):
             prop = node.child_by_field_name("property")
             obj = node.child_by_field_name("object")
             if obj and obj.type == "identifier":
-                oname = get_node_text(obj)
+                oname = self._node_text(obj)
                 if oname == "exports":
                     return True
-                if oname == "module" and prop and (get_node_text(prop) == "exports"):
+                if oname == "module" and prop and (self._node_text(prop) == "exports"):
                     return True
             node = obj
         return False
@@ -720,14 +732,14 @@ class JavaScriptCodeParser(AbstractCodeParser):
         if node.type != "call_expression":
             return
         fn = node.child_by_field_name("function")
-        if fn and fn.type == "identifier" and (get_node_text(fn) or "") == "require":
+        if fn and fn.type == "identifier" and self._node_text(fn) == "require":
             args = node.child_by_field_name("arguments")
             if not args:
                 return
             str_node = next((c for c in args.children if c.type == "string"), None)
             if not str_node:
                 return
-            module = (get_node_text(str_node) or "").strip("\"'")
+            module = self._node_text(str_node).strip("\"'")
             phys, virt, ext = self._resolve_module(module)
             assert self.parsed_file is not None
             self.parsed_file.imports.append(
@@ -737,7 +749,7 @@ class JavaScriptCodeParser(AbstractCodeParser):
                     alias=alias,
                     dot=False,
                     external=ext,
-                    raw=get_node_text(node) or "",
+                    raw=self._node_text(node),
                 )
             )
 
