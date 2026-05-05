@@ -58,6 +58,13 @@ MatchBM25Fn = CustomFunction("fts_main_nodes.match_bm25", ["id", "query"])
 ArrayCosineSimilarityFn = CustomFunction("array_cosine_similarity", ["vec", "param"])
 RegexpFullMatch = CustomFunction("regexp_full_match", ["s", "pat"])
 
+FTS_INDEX_TABLE = "nodes"
+FTS_INDEX_SCHEMA = "fts_main_nodes"
+FTS_MATCH_FUNCTION = "match_bm25"
+FTS_VALIDATE_SQL = f"SELECT {FTS_INDEX_SCHEMA}.{FTS_MATCH_FUNCTION}(?, ?)"
+FTS_REBUILD_SQL = f"PRAGMA create_fts_index('{FTS_INDEX_TABLE}', 'id', 'fts_needle')"
+FTS_DROP_SQL = f"PRAGMA drop_fts_index('{FTS_INDEX_TABLE}')"
+
 
 class Glob(Criterion):
     def __init__(self, left: Term, right: Term):
@@ -104,6 +111,87 @@ def _row_to_dict(rel) -> list[dict[str, Any]]:
         out.append(d)
 
     return out
+
+
+def _is_missing_fts_macro_error(exc: Exception) -> bool:
+    msg = str(exc)
+    return (
+        "match_bm25 does not exist" in msg
+        or f"{FTS_INDEX_SCHEMA}.{FTS_MATCH_FUNCTION}" in msg
+    )
+
+
+def _validate_fts_index(execute_sql: Callable[[str, Optional[list[Any]]], Any]) -> bool:
+    try:
+        execute_sql(FTS_VALIDATE_SQL, ["__knowlt_fts_probe__", "__knowlt_fts_probe__"])
+        return True
+    except Exception as exc:
+        if _is_missing_fts_macro_error(exc):
+            return False
+        raise
+
+
+def _ensure_fts_index(
+    execute_sql: Callable[[str, Optional[list[Any]]], Any],
+    *,
+    force_rebuild: bool = False,
+) -> bool:
+    if not force_rebuild and _validate_fts_index(execute_sql):
+        return False
+
+    if force_rebuild:
+        try:
+            execute_sql(FTS_DROP_SQL, None)
+        except Exception as exc:
+            logger.debug("Failed to drop DuckDB FTS index before rebuild", ex=exc)
+
+    execute_sql(FTS_REBUILD_SQL, None)
+
+    if not _validate_fts_index(execute_sql):
+        raise RuntimeError(
+            "DuckDB FTS index rebuild completed but BM25 macro is still unavailable"
+        )
+
+    return True
+
+
+async def _validate_fts_index_async(
+    execute_sql: Callable[[str, Optional[list[Any]]], Any],
+) -> bool:
+    try:
+        await execute_sql(
+            FTS_VALIDATE_SQL,
+            ["__knowlt_fts_probe__", "__knowlt_fts_probe__"],
+        )
+        return True
+    except Exception as exc:
+        if _is_missing_fts_macro_error(exc):
+            return False
+        raise
+
+
+async def _ensure_fts_index_async(
+    execute_sql: Callable[[str, Optional[list[Any]]], Any],
+    *,
+    force_rebuild: bool = False,
+) -> bool:
+    if not force_rebuild and await _validate_fts_index_async(execute_sql):
+        return False
+
+    if force_rebuild:
+        try:
+            await execute_sql(FTS_DROP_SQL, None)
+        except Exception as exc:
+            logger.debug("Failed to drop DuckDB FTS index before rebuild", ex=exc)
+
+    await execute_sql(FTS_REBUILD_SQL, None)
+
+    if not await _validate_fts_index_async(execute_sql):
+        raise RuntimeError(
+            "DuckDB FTS index rebuild completed but BM25 macro is still unavailable"
+        )
+
+    return True
 
 
 # TODO: Rewrite and batch all operations
@@ -222,6 +310,10 @@ class DuckDBThreadWrapper(BaseQueueWorker):
             CREATE_MIGRATIONS_TABLE_SQL,
             INSERT_MIGRATION_SQL,
         )
+
+        rebuilt = _ensure_fts_index(execute_fn)
+        if rebuilt:
+            logger.info("Rebuilt missing DuckDB FTS index during initialization")
 
     def _handle_item(self, item: Any) -> None:
         sql, params, fut = item
@@ -1141,9 +1233,11 @@ class DuckDBDataRepository(data.AbstractDataRepository):
 
     async def refresh_indexes(self) -> None:
         try:
-            await self._conn.execute("PRAGMA drop_fts_index('nodes');")
-            await self._conn.execute(
-                "PRAGMA create_fts_index('nodes', 'id', 'fts_needle');"
+            rebuilt = await _ensure_fts_index_async(
+                self._conn.execute,
+                force_rebuild=True,
             )
+            if rebuilt:
+                logger.info("Refreshed DuckDB FTS index")
         except Exception as ex:
             logger.debug("Failed to refresh DuckDB FTS index", ex=ex)
