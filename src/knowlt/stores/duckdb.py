@@ -279,18 +279,13 @@ class DuckDBThreadWrapper(BaseQueueWorker):
         self._conn: Optional[duckdb.DuckDBPyConnection] = None
 
     def _initialize_worker(self) -> None:
-        self._conn = duckdb.connect()
+        self._conn = duckdb.connect(self._db_path)
 
         self._conn.execute("INSTALL vss")
         self._conn.execute("LOAD vss")
 
         self._conn.execute("INSTALL fts")
         self._conn.execute("LOAD fts")
-
-        # TODO: SQL injection?
-        if self._db_path:
-            self._conn.execute(f"ATTACH '{self._db_path}' as db")
-            self._conn.execute("USE db")
 
         def execute_fn(sql: str, params: Optional[list[Any]] = None):
             assert self._conn is not None
