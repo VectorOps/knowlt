@@ -121,6 +121,18 @@ def _is_missing_fts_macro_error(exc: Exception) -> bool:
     )
 
 
+def _format_fts_startup_error(db_path: Optional[str], exc: Exception) -> str:
+    if not db_path or db_path == ":memory:":
+        db_label = "the DuckDB database"
+    else:
+        db_label = f"the DuckDB database at {db_path}"
+    return (
+        f"DuckDB full-text search initialization failed for {db_label}. "
+        "Delete the database file and restart to rebuild it from source. "
+        f"Original error: {exc}"
+    )
+
+
 def _validate_fts_index(execute_sql: Callable[[str, Optional[list[Any]]], Any]) -> bool:
     try:
         execute_sql(FTS_VALIDATE_SQL, ["__knowlt_fts_probe__", "__knowlt_fts_probe__"])
@@ -278,8 +290,8 @@ class DuckDBThreadWrapper(BaseQueueWorker):
         self._db_path = db_path
         self._conn: Optional[duckdb.DuckDBPyConnection] = None
 
-    def _initialize_worker(self) -> None:
-        self._conn = duckdb.connect(self._db_path)
+    def _initialize_connection(self) -> None:
+        assert self._conn is not None
 
         self._conn.execute("INSTALL vss")
         self._conn.execute("LOAD vss")
@@ -309,6 +321,13 @@ class DuckDBThreadWrapper(BaseQueueWorker):
         rebuilt = _ensure_fts_index(execute_fn)
         if rebuilt:
             logger.info("Rebuilt missing DuckDB FTS index during initialization")
+
+    def _initialize_worker(self) -> None:
+        self._conn = duckdb.connect(self._db_path)
+        try:
+            self._initialize_connection()
+        except Exception as exc:
+            raise RuntimeError(_format_fts_startup_error(self._db_path, exc)) from exc
 
     def _handle_item(self, item: Any) -> None:
         sql, params, fut = item
@@ -1179,7 +1198,12 @@ class DuckDBDataRepository(data.AbstractDataRepository):
             os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
 
         self._conn = DuckDBThreadWrapper(db_path)
-        self._conn.start()
+        try:
+            self._conn.start()
+        except Exception as exc:
+            if "Delete the database file and restart" in str(exc):
+                raise
+            raise RuntimeError(_format_fts_startup_error(db_path, exc)) from exc
         self._settings = settings
 
         # build repositories
@@ -1230,7 +1254,7 @@ class DuckDBDataRepository(data.AbstractDataRepository):
         try:
             rebuilt = await _ensure_fts_index_async(
                 self._conn.execute,
-                force_rebuild=True,
+                force_rebuild=False,
             )
             if rebuilt:
                 logger.info("Refreshed DuckDB FTS index")
