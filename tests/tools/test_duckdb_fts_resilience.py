@@ -33,6 +33,50 @@ async def test_reopen_recovers_missing_fts_macro(tmp_path):
     finally:
         repo.close()
 
+
+@pytest.mark.asyncio
+async def test_refresh_indexes_keeps_fts_macro_after_reopen(tmp_path):
+    db_path = tmp_path / "fts-refresh-after-reopen.duckdb"
+    settings = ProjectSettings(repository_connection=str(db_path))
+
+    repo = DuckDBDataRepository(settings, db_path=str(db_path))
+    try:
+        await repo.repo.create(
+            [Repo(id="repo-1", name="repo-1", root_path=str(tmp_path))]
+        )
+        await repo.node.create(
+            [
+                Node(
+                    id="node-1",
+                    repo_id="repo-1",
+                    name="hello_world",
+                    body="hello world search text",
+                    kind=NodeKind.FUNCTION,
+                )
+            ]
+        )
+        await repo.refresh_indexes()
+    finally:
+        repo.close()
+
+    reopened = DuckDBDataRepository(settings, db_path=str(db_path))
+    try:
+        before = await reopened._conn.execute(
+            "SELECT fts_main_nodes.match_bm25(?, ?)",
+            ["node-1", "hello"],
+        )
+        assert len(before) == 1
+
+        await reopened.refresh_indexes()
+
+        after = await reopened._conn.execute(
+            "SELECT fts_main_nodes.match_bm25(?, ?)",
+            ["node-1", "hello"],
+        )
+        assert len(after) == 1
+    finally:
+        reopened.close()
+
     reopened = DuckDBDataRepository(settings, db_path=str(db_path))
     try:
         probe = await reopened._conn.execute(

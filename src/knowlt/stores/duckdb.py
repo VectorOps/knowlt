@@ -63,6 +63,9 @@ FTS_INDEX_SCHEMA = "fts_main_nodes"
 FTS_MATCH_FUNCTION = "match_bm25"
 FTS_VALIDATE_SQL = f"SELECT {FTS_INDEX_SCHEMA}.{FTS_MATCH_FUNCTION}(?, ?)"
 FTS_REBUILD_SQL = f"PRAGMA create_fts_index('{FTS_INDEX_TABLE}', 'id', 'fts_needle')"
+FTS_REBUILD_OVERWRITE_SQL = (
+    f"PRAGMA create_fts_index('{FTS_INDEX_TABLE}', 'id', 'fts_needle', overwrite=1)"
+)
 FTS_DROP_SQL = f"PRAGMA drop_fts_index('{FTS_INDEX_TABLE}')"
 
 
@@ -162,6 +165,19 @@ def _ensure_fts_index(
     if not _validate_fts_index(execute_sql):
         raise RuntimeError(
             "DuckDB FTS index rebuild completed but BM25 macro is still unavailable"
+        )
+
+    return True
+
+
+async def _refresh_fts_index_async(
+    execute_sql: Callable[[str, Optional[list[Any]]], Any],
+) -> bool:
+    await execute_sql(FTS_REBUILD_OVERWRITE_SQL, None)
+
+    if not await _validate_fts_index_async(execute_sql):
+        raise RuntimeError(
+            "DuckDB FTS index refresh completed but BM25 macro is still unavailable"
         )
 
     return True
@@ -1252,10 +1268,7 @@ class DuckDBDataRepository(data.AbstractDataRepository):
 
     async def refresh_indexes(self) -> None:
         try:
-            rebuilt = await _ensure_fts_index_async(
-                self._conn.execute,
-                force_rebuild=True,
-            )
+            rebuilt = await _refresh_fts_index_async(self._conn.execute)
             if rebuilt:
                 logger.info("Refreshed DuckDB FTS index")
         except Exception as ex:
