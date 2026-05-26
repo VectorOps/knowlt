@@ -408,8 +408,8 @@ async def scan_repo(
             )
         )
 
-    # Refresh any full text indexes
-    asyncio.create_task(pm.data.refresh_indexes())
+    # Refresh full-text indexes before returning so fresh scans are searchable.
+    await pm.data.refresh_indexes()
     # Schedule missing/outdated embeddings in background
     asyncio.create_task(schedule_missing_embeddings(pm, repo))
     asyncio.create_task(schedule_outdated_embeddings(pm, repo))

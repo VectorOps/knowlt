@@ -1254,7 +1254,7 @@ class DuckDBDataRepository(data.AbstractDataRepository):
         try:
             rebuilt = await _ensure_fts_index_async(
                 self._conn.execute,
-                force_rebuild=False,
+                force_rebuild=True,
             )
             if rebuilt:
                 logger.info("Refreshed DuckDB FTS index")
