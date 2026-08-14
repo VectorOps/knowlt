@@ -1,5 +1,6 @@
 from knowlt.consts import VIRTUAL_PATH_PREFIX
 from pathlib import Path
+import asyncio
 import os
 import os.path as op
 import datetime
@@ -65,6 +66,7 @@ class ProjectCache:
 
 class ProjectManager:
     _component_registry: Dict[str, Type[ProjectComponent]] = {}
+    _auto_refresh_debounce = datetime.timedelta(seconds=1)
 
     @classmethod
     def register_component(
@@ -86,6 +88,9 @@ class ProjectManager:
         self.data = data
         self.embeddings = embeddings
         self._last_refresh_time: Optional[datetime.datetime] = None
+        self._last_refresh_request_time: Optional[datetime.datetime] = None
+        self._refresh_task: Optional[asyncio.Task] = None
+        self._refresh_task_lock = asyncio.Lock()
         self._components: dict[str, ProjectComponent] = {}
         # In-memory caches for repos to allow sync helpers to function without async data calls
         self._repos_by_id: dict[str, Repo] = {}
@@ -334,6 +339,25 @@ class ProjectManager:
         for repo in repos_to_refresh:
             await self.refresh(repo, progress_callback=progress_callback)
 
+    async def _run_auto_refresh(
+        self,
+        progress_callback: Optional[callable] = None,
+    ) -> None:
+        try:
+            if self.settings.refresh.refresh_all_repos:
+                logger.debug("Auto-refreshing all associated repositories...")
+                await self.refresh_all(progress_callback=progress_callback)
+            else:
+                logger.debug("Auto-refreshing primary repository...")
+                await self.refresh(
+                    progress_callback=progress_callback
+                )  # Just refreshes default repo
+        finally:
+            async with self._refresh_task_lock:
+                current_task = asyncio.current_task()
+                if self._refresh_task is current_task:
+                    self._refresh_task = None
+
     async def maybe_refresh(
         self,
         progress_callback: Optional[callable] = None,
@@ -355,14 +379,31 @@ class ProjectManager:
                     )
                     return
 
-        if self.settings.refresh.refresh_all_repos:
-            logger.debug("Auto-refreshing all associated repositories...")
-            await self.refresh_all(progress_callback=progress_callback)
-        else:
-            logger.debug("Auto-refreshing primary repository...")
-            await self.refresh(
-                progress_callback=progress_callback
-            )  # Just refreshes default repo
+        refresh_task = None
+        now = datetime.datetime.now(datetime.timezone.utc)
+
+        async with self._refresh_task_lock:
+            if self._refresh_task is not None and not self._refresh_task.done():
+                logger.debug("Auto-refresh already in progress; waiting on existing run.")
+                refresh_task = self._refresh_task
+            elif (
+                self._last_refresh_request_time is not None
+                and now - self._last_refresh_request_time < self._auto_refresh_debounce
+            ):
+                logger.debug(
+                    "Skipping auto-refresh due to debounce.",
+                    since_last_request=now - self._last_refresh_request_time,
+                    debounce_window=self._auto_refresh_debounce,
+                )
+                return
+            else:
+                self._last_refresh_request_time = now
+                refresh_task = asyncio.create_task(
+                    self._run_auto_refresh(progress_callback=progress_callback)
+                )
+                self._refresh_task = refresh_task
+
+        await refresh_task
 
     async def refresh_components(self, scan_result: ScanResult):
         for name, comp in self._components.items():

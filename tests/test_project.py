@@ -1,6 +1,7 @@
 import os
 import os.path as op
 from unittest.mock import MagicMock, AsyncMock
+import asyncio
 
 import pytest
 
@@ -197,3 +198,52 @@ class TestProjectPaths:
         )
         bad_path = op.join(VIRTUAL_PATH_PREFIX, "non_existent_repo", "file.py")
         assert pm_disabled.deconstruct_virtual_path(bad_path) is None
+
+
+@pytest.mark.asyncio
+async def test_maybe_refresh_dedupes_concurrent_requests(project_env):
+    settings = ProjectSettings(
+        project_name="test-project",
+        repo_name=project_env["default_repo"].name,
+        repo_path=project_env["default_repo"].root_path,
+    )
+    settings.refresh.cooldown_minutes = 0
+    pm = await ProjectManager.create(settings=settings, data=project_env["data"])
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_refresh(*args, **kwargs):
+        started.set()
+        await release.wait()
+
+    pm.refresh = AsyncMock(side_effect=fake_refresh)
+
+    tasks = [asyncio.create_task(pm.maybe_refresh()) for _ in range(5)]
+    await started.wait()
+    await asyncio.sleep(0)
+
+    assert pm.refresh.await_count == 1
+
+    release.set()
+    await asyncio.gather(*tasks)
+
+    assert pm.refresh.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_maybe_refresh_skips_immediate_followup_request(project_env):
+    settings = ProjectSettings(
+        project_name="test-project",
+        repo_name=project_env["default_repo"].name,
+        repo_path=project_env["default_repo"].root_path,
+    )
+    settings.refresh.cooldown_minutes = 0
+    pm = await ProjectManager.create(settings=settings, data=project_env["data"])
+
+    pm.refresh = AsyncMock()
+
+    await pm.maybe_refresh()
+    await pm.maybe_refresh()
+
+    assert pm.refresh.await_count == 1
